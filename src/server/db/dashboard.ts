@@ -22,8 +22,13 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     }),
   ]);
 
-  // Quantum readiness: average PQC safety score across all assets (roll up to 0–10)
+  // Quantum readiness: average PQC safety score, rolled up to 0–10.
+  // Scoped to actual cryptographic primitives (algorithms, keys, certs) —
+  // a LIBRARY row (dependency presence) or a PROTOCOL row (TLS version pin,
+  // already captured separately as a finding) isn't itself a graded
+  // primitive and would dilute the signal this score exists to give.
   const avgPqc = await prisma.riskAssessment.aggregate({
+    where: { cryptoAsset: { kind: { in: ["ALGORITHM", "CERTIFICATE", "KEY"] } } },
     _avg: { pqcSafetyScore: true },
   });
   const quantumReadinessScore = Math.round(avgPqc._avg.pqcSafetyScore ?? 5);
@@ -33,21 +38,6 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     where: { status: "COMPLETED" },
     select: { repositoryId: true },
     distinct: ["repositoryId"],
-  });
-
-  // Vulnerabilities by source (map kind → source label)
-  const kindToSource: Record<string, string> = {
-    ALGORITHM: "Code Repo",
-    CERTIFICATE: "Code Repo",
-    KEY: "Code Repo",
-    PROTOCOL: "Network",
-    LIBRARY: "Code Repo",
-    SECRET: "Code Repo",
-  };
-  const findingsBySeverity = await prisma.finding.groupBy({
-    by: ["severity"],
-    where: { status: "OPEN" },
-    _count: { severity: true },
   });
 
   // Build posture breakdown from risk assessments
@@ -67,16 +57,26 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     compliant: posturePct("SAFE"),
   };
 
-  // By source type — simplified 7-bar chart
-  const vulnBySource: VulnBySource[] = [
-    "Hosts", "Network", "KMS", "Database", "Code Repo", "File Systems", "Database"
-  ].map((source) => ({
-    source,
-    critical: Math.floor(Math.random() * 10) + 5,
-    high: Math.floor(Math.random() * 8) + 2,
-    moderate: Math.floor(Math.random() * 6) + 1,
-    low: Math.floor(Math.random() * 8) + 3,
-  }));
+  // By artefact source — remap of the reference's "By Source Type" chart onto
+  // the categories this build actually discovers (IMPLEMENTATION_PLAN.md §1
+  // "Dashboard 'By Source Type' → By artefact source: Source Code ·
+  // Dependencies · Certificates · Config · Secrets · Keystores · IaC").
+  const openFindings = await prisma.finding.findMany({
+    where: { status: "OPEN" },
+    select: { severity: true, filePath: true, code: true },
+  });
+  const sourceBuckets = ["Source Code", "Dependencies", "Certificates", "Config", "Secrets", "Keystores", "IaC"];
+  const bySource: Record<string, { critical: number; high: number; moderate: number; low: number }> = {};
+  for (const source of sourceBuckets) bySource[source] = { critical: 0, high: 0, moderate: 0, low: 0 };
+  for (const f of openFindings) {
+    const bucket = inferArtefactSource(f.filePath, f.code);
+    const counts = bySource[bucket];
+    if (f.severity === "CRITICAL") counts.critical++;
+    else if (f.severity === "HIGH") counts.high++;
+    else if (f.severity === "MODERATE") counts.moderate++;
+    else if (f.severity === "LOW") counts.low++;
+  }
+  const vulnBySource: VulnBySource[] = sourceBuckets.map((source) => ({ source, ...bySource[source] }));
 
   // Asset type distribution
   const kindLabel: Record<string, string> = {
@@ -135,4 +135,22 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     symmetricKeyDistribution: buildDistribution(symmetricKeys),
     asymmetricKeyDistribution: buildDistribution(asymmetricKeys),
   };
+}
+
+function inferArtefactSource(filePath: string | null, ruleCode: string): string {
+  const p = (filePath ?? "").toLowerCase();
+  const code = ruleCode.toLowerCase();
+
+  if (/\.tf$/.test(p) || /^protocol-terraform/.test(code)) return "IaC";
+  if (/\.(yaml|yml)$/.test(p) && /(k8s|kube|deployment|secret)/.test(p)) return "IaC";
+  if (/(nginx|apache|httpd|sshd_config|ssh_config|openssl\.cnf)/.test(p) || /^protocol-/.test(code)) return "Config";
+  if (/\.(pem|crt|cer|der|jks|p12|pfx)$/.test(p) || /^cert-/.test(code)) {
+    return /\.(jks|p12|pfx)$/.test(p) ? "Keystores" : "Certificates";
+  }
+  if (/(package\.json|requirements|pom\.xml|build\.gradle|go\.mod|cargo\.toml|cmakelists)/.test(p) || /^manifest-/.test(code)) {
+    return "Dependencies";
+  }
+  if (/^secret-/.test(code)) return "Secrets";
+  if (/^key-/.test(code)) return "Keystores";
+  return "Source Code";
 }

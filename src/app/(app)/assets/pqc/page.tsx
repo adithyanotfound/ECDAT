@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { cryptoAssets } from "@/fixtures/assets";
+import { useState, useEffect } from "react";
 import { DataTable } from "@/components/ui/DataTable";
 import { ScoreBar, SeverityPill, ScorePill } from "@/components/ui/Pill";
 import { Drawer } from "@/components/ui/Drawer";
 import { Tabs } from "@/components/ui/Tabs";
+import { MoscaTimeline } from "@/components/ui/MoscaTimeline";
 import type { ColumnDef } from "@/components/ui/DataTable";
 import type { CryptoAsset } from "@/fixtures/types";
 import { formatDate } from "@/lib/format";
@@ -117,10 +117,20 @@ function AssetDrawer({ asset, onClose }: { asset: CryptoAsset | null; onClose: (
           tabs={[
             { id: "details", label: "Details" },
             { id: "cis", label: "CIS Explanation" },
+            { id: "mosca", label: "Mosca" },
           ]}
         >
           {(activeTab) =>
-            activeTab === "details" ? (
+            activeTab === "mosca" ? (
+              <div className="mt-4 p-4 rounded-lg" style={{ backgroundColor: "var(--color-surface-2)" }}>
+                <MoscaTimeline
+                  x={asset.moscaX ?? 5}
+                  y={asset.moscaY ?? 3}
+                  z={asset.moscaZ ?? 7}
+                  verdict={asset.moscaVerdict ?? (asset.quantumSafe ? "SAFE" : "PLAN")}
+                />
+              </div>
+            ) : activeTab === "details" ? (
               <div className="mt-4">
                 <table className="w-full text-sm">
                   <thead>
@@ -229,8 +239,15 @@ function AssetDrawer({ asset, onClose }: { asset: CryptoAsset | null; onClose: (
 
 export default function PqcPage() {
   const [selectedAsset, setSelectedAsset] = useState<CryptoAsset | null>(null);
+  const [algorithms, setAlgorithms] = useState<CryptoAsset[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const algorithms = cryptoAssets.filter((a) => a.kind === "Algorithm");
+  useEffect(() => {
+    fetch("/api/assets?kind=ALGORITHM&pageSize=500")
+      .then((r) => r.json())
+      .then((data) => setAlgorithms(data.items ?? []))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
@@ -251,12 +268,13 @@ export default function PqcPage() {
           >
             <Shield size={14} /> CBOM Report
           </a>
-          <button
+          <a
+            href="/api/assets/export?kind=ALGORITHM"
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
             style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
           >
-            <Download size={14} /> Download CBOM
-          </button>
+            <Download size={14} /> Export Inventory (JSON)
+          </a>
         </div>
       </div>
 

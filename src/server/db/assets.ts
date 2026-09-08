@@ -204,6 +204,10 @@ export async function getCryptoAssetsPage({
       crsfScore,
       pqcSafetyScore: pqcScore,
       severity: crsfScore >= 70 ? "Critical" : crsfScore >= 45 ? "High" : crsfScore >= 20 ? "Moderate" : crsfScore >= 10 ? "Low" : "Compliant",
+      moscaX: risk?.moscaX,
+      moscaY: risk?.moscaY,
+      moscaZ: risk?.moscaZ,
+      moscaVerdict: risk?.moscaVerdict as CryptoAsset["moscaVerdict"],
     };
   });
 

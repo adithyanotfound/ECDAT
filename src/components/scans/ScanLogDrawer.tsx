@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Terminal, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { X, Terminal, CheckCircle2, XCircle, Loader2, GitCompare } from "lucide-react";
+import { ScanDiffPanel } from "./ScanDiffPanel";
 
 interface LogEntry {
   id: string;
@@ -32,8 +33,13 @@ const levelPrefix: Record<string, string> = {
 export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<"streaming" | "done" | "failed" | "idle">("idle");
+  const [activeTab, setActiveTab] = useState<"logs" | "changes">("logs");
   const scrollRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    setActiveTab("logs");
+  }, [scanId]);
 
   useEffect(() => {
     if (!scanId) {
@@ -154,8 +160,31 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
           </div>
         </div>
 
+        {/* Tab strip */}
+        <div className="flex items-center gap-1 px-4 pt-2 flex-shrink-0" style={{ borderBottom: "1px solid var(--color-border)" }}>
+          {([
+            { id: "logs" as const, label: "Logs", icon: Terminal },
+            { id: "changes" as const, label: "Changes", icon: GitCompare },
+          ]).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+              style={{
+                color: activeTab === tab.id ? "var(--color-accent)" : "var(--color-ink-muted)",
+                borderBottom: activeTab === tab.id ? "2px solid var(--color-accent)" : "2px solid transparent",
+              }}
+            >
+              <tab.icon size={12} /> {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "changes" && <ScanDiffPanel scanId={scanId} />}
+
         {/* Log output */}
         <div
+          hidden={activeTab !== "logs"}
           ref={scrollRef}
           className="flex-1 overflow-y-auto p-4 font-mono"
           style={{

@@ -130,7 +130,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.redirect(new URL("/scanning/repositories?connected=1", req.url));
   } catch (err) {
-    console.error("[setup] error:", err);
+    // Message only — never the raw error, which can carry a live
+    // installation token on an Octokit error's `.request` property.
+    console.error("[setup] error:", err instanceof Error ? err.message : String(err));
     return NextResponse.redirect(new URL("/scanning/repositories?error=setup_failed", req.url));
   }
 }

@@ -81,6 +81,11 @@ export interface CryptoAsset {
   crsfScore: number;
   pqcSafetyScore: number;
   severity: Severity;
+  // Mosca's inequality — X (data lifetime) + Y (migration time) > Z (time to CRQC)
+  moscaX?: number;
+  moscaY?: number;
+  moscaZ?: number;
+  moscaVerdict?: "ACT_NOW" | "PLAN" | "SAFE";
 }
 
 // ─── Finding / Vulnerability ───────────────────────────────────────────────────

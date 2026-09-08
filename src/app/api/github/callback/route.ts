@@ -92,7 +92,9 @@ export async function GET(req: NextRequest) {
     response.headers.set("Set-Cookie", makeSessionCookie(token));
     return response;
   } catch (err) {
-    console.error("[callback] error:", err);
+    // Message only — never the raw error, which can carry a live token on
+    // an Octokit error's `.request` property.
+    console.error("[callback] error:", err instanceof Error ? err.message : String(err));
     return NextResponse.redirect(new URL("/login?error=server_error", req.url));
   }
 }

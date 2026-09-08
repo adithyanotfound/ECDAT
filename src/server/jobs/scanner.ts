@@ -1,108 +1,309 @@
 /**
- * No-op scanner — Phase 3 placeholder.
- * Writes plausible CryptoAsset, RiskAssessment and Finding rows so the
- * full job loop is provably working before Phase 4 plugs in the real engine.
+ * The real detector pipeline (Phase 4 replaces the Phase 3 no-op placeholder).
  *
- * Phase 4 will replace runScanner() with the real detector pipeline.
+ * Checks out the pushed commit via tarball, runs the discovery engine over
+ * it, normalises + scores every hit, upserts CryptoAsset/RiskAssessment/
+ * Finding rows against the [repositoryId, fingerprint] constraint so re-scans
+ * diff instead of duplicate, regenerates PQC recommendations, builds and
+ * persists a CycloneDX 1.6 CBOM, and — for push-triggered scans — posts a
+ * GitHub Check Run with the verdict.
+ *
+ * Temp-directory cleanup is guaranteed via try/finally (§Phase 5 "Hardening":
+ * "a failed scan must not leak a checkout").
  */
 import { prisma } from "@/server/db/client";
-
-const NOOP_ALGOS = [
-  { name: "AES-256-GCM", primitive: "block-cipher", key: 256, mode: "GCM", qs: true, crsf: 3, pqc: 9 },
-  { name: "RSA-2048", primitive: "signature", key: 2048, qs: false, crsf: 48, pqc: 4 },
-  { name: "SHA-256", primitive: "hash", key: 256, qs: true, crsf: 5, pqc: 8 },
-  { name: "3DES", primitive: "block-cipher", key: 168, mode: "CBC", qs: false, crsf: 85, pqc: 1 },
-  { name: "HMAC-SHA256", primitive: "mac", key: 256, qs: true, crsf: 8, pqc: 8 },
-  { name: "ECDSA-P256", primitive: "signature", key: 256, qs: false, crsf: 40, pqc: 4 },
-];
-
-const NOOP_FINDINGS = [
-  { code: "NOOP-PQC-001", severity: "MODERATE" as const, title: "No post-quantum key exchange detected", detail: "Repository has no PQC or hybrid key exchange. Add ML-KEM-768 or X25519MLKEM768." },
-  { code: "NOOP-HASH-001", severity: "HIGH" as const, title: "Weak hash function in use", detail: "SHA-1 or MD5 detected. Migrate to SHA-256 or SHA3-256." },
-];
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+import { checkoutTarball } from "@/server/github/tarball";
+import { postScanCheckRun } from "@/server/github/checks";
+import { runEngine } from "@/server/engine/scan";
+import type { NormalizedHit, ScanProfileConfig } from "@/server/engine/types";
+import { DEFAULT_PROFILE } from "@/server/engine/types";
+import { computeCrsf, computeCis, computePqcSafety, computeMosca, riskCategoryFromCrsf } from "@/server/engine/scoring";
+import { getRecommendation } from "@/server/engine/recommendations";
+import { buildCbom, validateCbom, type CbomAssetInput } from "@/server/engine/cbom";
+import { logScan } from "@/lib/logger";
+import type { ScanJobPayload } from "./queue";
 
 export async function runScanner(
   scanId: string,
-  repositoryId: string
-): Promise<{ assetsWritten: number; findingsWritten: number }> {
-  await appendLog(scanId, "INFO", "[noop-scanner] Phase 3 placeholder — writing synthetic rows");
-  await appendLog(scanId, "INFO", "[noop-scanner] Running detector: algorithms");
+  repositoryId: string,
+  payload: ScanJobPayload
+): Promise<{ assetsWritten: number; findingsWritten: number; filesScanned: number }> {
+  const scan = await prisma.scan.findUniqueOrThrow({
+    where: { id: scanId },
+    include: { profile: true },
+  });
+  const repo = await prisma.repository.findUniqueOrThrow({ where: { id: repositoryId } });
 
-  const numAssets = 6 + Math.floor(Math.random() * 6);
-  let assetsWritten = 0;
+  const profileConfig: Partial<ScanProfileConfig> = scan.profile
+    ? {
+        includeGlobs: DEFAULT_PROFILE.includeGlobs,
+        excludeGlobs: [...DEFAULT_PROFILE.excludeGlobs, ...(scan.profile.excludeGlobs.length ? scan.profile.excludeGlobs : [])],
+        maxFileSizeKb: scan.profile.maxFileSizeKb,
+        rulePackIds: scan.profile.rulePackIds.length ? scan.profile.rulePackIds : DEFAULT_PROFILE.rulePackIds,
+      }
+    : {};
 
-  for (let i = 0; i < numAssets; i++) {
-    const algo = pick(NOOP_ALGOS);
-    const filePath = `/src/${pick(["crypto", "auth", "utils"])}/${pick(["cipher", "hash", "key"])}.ts`;
-    const fingerprint = `${repositoryId}-${algo.name}-${filePath}-noop`;
+  await appendLog(scanId, "INFO", `Fetching ${payload.owner}/${payload.repo}@${payload.ref} tarball`);
+  const gitRef = payload.ref.replace(/^refs\/heads\//, "");
+  const checkout = await checkoutTarball(payload.installationId, payload.owner, payload.repo, gitRef || payload.commitSha);
 
-    await prisma.cryptoAsset.upsert({
-      where: { repositoryId_fingerprint: { repositoryId, fingerprint } },
-      create: {
-        repositoryId,
-        fingerprint,
-        kind: "ALGORITHM",
-        name: algo.name,
-        primitive: algo.primitive,
-        algorithm: algo.name,
-        keyLengthBits: algo.key,
-        mode: algo.mode ?? null,
-        quantumSafe: algo.qs,
-        executionEnvironment: "software-plain-ram",
-        filePath,
-        usageCount: 1,
-        firstSeenScanId: scanId,
-        lastSeenScanId: scanId,
-        riskAssessment: {
-          create: {
-            crsfScore: algo.crsf,
-            cisScore: 100 - algo.crsf,
-            pqcSafetyScore: algo.pqc,
-            riskCategory: algo.crsf >= 70 ? "CRITICAL" : algo.crsf >= 45 ? "HIGH" : algo.crsf >= 20 ? "MODERATE" : "SAFE",
+  try {
+    await appendLog(scanId, "INFO", `Checked out to ${checkout.dir}`);
+
+    const result = await runEngine(repositoryId, checkout.dir, profileConfig, (level, message) => {
+      logScan(scanId, level, message, { repositoryId });
+      void appendLog(scanId, level, message);
+    });
+
+    await appendLog(scanId, "INFO", `Upserting ${result.hits.length} crypto assets`);
+
+    let assetsWritten = 0;
+    let findingsWritten = 0;
+    let quantumVulnerableCount = 0;
+
+    for (const hit of result.hits) {
+      const existing = await prisma.cryptoAsset.findUnique({
+        where: { repositoryId_fingerprint: { repositoryId, fingerprint: hit.fingerprint } },
+        select: { id: true, usageCount: true },
+      });
+      const usageCount = (existing?.usageCount ?? 0) + 1;
+
+      const crsfScore = computeCrsf(hit, { usageCount, criticality: repo.criticality });
+      const { score: cisScore, explanation: cisExplanation } = computeCis(hit, crsfScore);
+      const pqcSafetyScore = computePqcSafety(hit);
+      const riskCategory = riskCategoryFromCrsf(crsfScore);
+
+      const mosca = computeMosca({
+        dataLifetimeYears: repo.dataLifetimeYears,
+        quantumVulnerableCount: hit.quantumSafe === false ? 1 : 0,
+        totalAssetCount: result.hits.length,
+      });
+
+      const assetData = {
+        kind: hit.kind,
+        name: hit.canonicalName,
+        primitive: hit.primitive ?? null,
+        algorithm: hit.algorithm ?? null,
+        keyLengthBits: hit.keyLengthBits ?? null,
+        mode: hit.mode ?? null,
+        padding: hit.padding ?? null,
+        curve: hit.curve ?? null,
+        nistQuantumLevel: hit.nistQuantumLevel ?? null,
+        quantumSafe: hit.quantumSafe ?? null,
+        executionEnvironment: hit.executionEnvironment ?? null,
+        classicalSecLevel: hit.classicalSecLevel ?? null,
+        filePath: hit.filePath,
+        lineNumber: hit.lineNumber ?? null,
+        ruleId: hit.ruleId,
+      };
+
+      const asset = await prisma.cryptoAsset.upsert({
+        where: { repositoryId_fingerprint: { repositoryId, fingerprint: hit.fingerprint } },
+        create: {
+          repositoryId,
+          fingerprint: hit.fingerprint,
+          ...assetData,
+          usageCount: 1,
+          firstSeenScanId: scanId,
+          lastSeenScanId: scanId,
+          riskAssessment: {
+            create: {
+              crsfScore,
+              cisScore,
+              pqcSafetyScore,
+              riskCategory,
+              moscaX: mosca.x,
+              moscaY: mosca.y,
+              moscaZ: mosca.z,
+              moscaVerdict: mosca.verdict,
+              cisExplanation,
+            },
           },
         },
-      },
-      update: {
-        lastSeenScanId: scanId,
-        usageCount: { increment: 1 },
-      },
+        update: {
+          ...assetData,
+          usageCount,
+          lastSeenScanId: scanId,
+          riskAssessment: {
+            upsert: {
+              create: {
+                crsfScore,
+                cisScore,
+                pqcSafetyScore,
+                riskCategory,
+                moscaX: mosca.x,
+                moscaY: mosca.y,
+                moscaZ: mosca.z,
+                moscaVerdict: mosca.verdict,
+                cisExplanation,
+              },
+              update: {
+                crsfScore,
+                cisScore,
+                pqcSafetyScore,
+                riskCategory,
+                moscaX: mosca.x,
+                moscaY: mosca.y,
+                moscaZ: mosca.z,
+                moscaVerdict: mosca.verdict,
+                cisExplanation,
+              },
+            },
+          },
+        },
+      });
+      assetsWritten++;
+
+      if (hit.quantumSafe === false) {
+        quantumVulnerableCount++;
+      }
+
+      // A detector can assert severity directly (disabled TLS verification, a
+      // hardcoded key, JWT alg=none). Everything else still becomes a Finding
+      // when its computed CRSF risk category lands at CRITICAL/HIGH — a bare
+      // MD5 or 3DES call site is a vulnerability even though no single rule
+      // hand-labelled it one. Library/dependency inventory is excluded: an
+      // old package being *present* isn't itself a discrete finding here.
+      const findingSeverity =
+        hit.severity ??
+        (hit.kind !== "LIBRARY" && (riskCategory === "CRITICAL" || riskCategory === "HIGH")
+          ? riskCategory
+          : undefined);
+
+      if (findingSeverity) {
+        const findingCode = hit.ruleId.toUpperCase().replace(/\./g, "-");
+        const existingFinding = await prisma.finding.findFirst({
+          where: { repositoryId, code: findingCode, filePath: hit.filePath },
+          select: { id: true },
+        });
+
+        const findingData = {
+          severity: findingSeverity,
+          title: findingTitle(hit),
+          detail: hit.evidence,
+          remediation: getRecommendation(hit)?.notes ?? null,
+          cweId: hit.cweId ?? null,
+          nistRef: hit.nistRef ?? null,
+          affectedComponent: hit.canonicalName,
+          filePath: hit.filePath,
+          lineNumber: hit.lineNumber ?? null,
+          lastSeenScanId: scanId,
+          lastSeenAt: new Date(),
+        };
+
+        const finding = existingFinding
+          ? await prisma.finding.update({ where: { id: existingFinding.id }, data: findingData })
+          : await prisma.finding.create({
+              data: { repositoryId, code: findingCode, firstSeenScanId: scanId, ...findingData },
+            });
+
+        await prisma.findingAsset.upsert({
+          where: { findingId_cryptoAssetId: { findingId: finding.id, cryptoAssetId: asset.id } },
+          create: { findingId: finding.id, cryptoAssetId: asset.id },
+          update: {},
+        });
+        findingsWritten++;
+      }
+    }
+
+    await appendLog(scanId, "INFO", `Wrote ${assetsWritten} crypto assets, ${findingsWritten} findings`);
+
+    // ── Recommendations — regenerate fresh from this scan's quantum-vulnerable canon names ──
+    await appendLog(scanId, "INFO", "Regenerating PQC recommendations");
+    await prisma.recommendation.deleteMany({ where: { repositoryId } });
+    const recoRows = dedupeRecommendations(result.hits);
+    if (recoRows.length) {
+      await prisma.recommendation.createMany({
+        data: recoRows.map((r) => ({ repositoryId, ...r })),
+      });
+    }
+
+    // ── CBOM — build from the full current inventory, not just this scan's hits ──
+    await appendLog(scanId, "INFO", "Building CycloneDX 1.6 CBOM");
+    const allAssets = await prisma.cryptoAsset.findMany({ where: { repositoryId } });
+    const cbomAssets: CbomAssetInput[] = allAssets.map((a) => ({
+      id: a.id,
+      kind: a.kind,
+      name: a.name,
+      primitive: a.primitive,
+      mode: a.mode,
+      padding: a.padding,
+      keyLengthBits: a.keyLengthBits,
+      curve: a.curve,
+      nistQuantumLevel: a.nistQuantumLevel,
+      classicalSecLevel: a.classicalSecLevel,
+      executionEnvironment: a.executionEnvironment,
+      filePath: a.filePath,
+      usageCount: a.usageCount,
+      lastSeenAt: a.updatedAt.toISOString(),
+    }));
+    const cbom = buildCbom({
+      repositoryFullName: repo.fullName,
+      commitSha: payload.commitSha,
+      scanId,
+      assets: cbomAssets,
     });
-    assetsWritten++;
+    const validation = validateCbom(cbom);
+    if (!validation.valid) {
+      await appendLog(scanId, "WARN", `CBOM failed structural validation: ${validation.errors.slice(0, 3).join("; ")}`);
+    } else {
+      // Round-trip through JSON to strip `undefined` fields before handing to Prisma's Json column.
+      const cbomJson = JSON.parse(JSON.stringify(cbom));
+      await prisma.cbom.upsert({
+        where: { scanId },
+        create: { scanId, spec: "1.6", json: cbomJson },
+        update: { spec: "1.6", json: cbomJson },
+      });
+      await appendLog(scanId, "INFO", `CBOM persisted with ${cbom.components.length} components`);
+    }
+
+    // ── Optional GitHub Check Run — push-triggered scans only ──
+    if (scan.trigger === "PUSH" && payload.installationId) {
+      const newCritical = await prisma.finding.count({
+        where: { repositoryId, firstSeenScanId: scanId, severity: "CRITICAL" },
+      });
+      const newHigh = await prisma.finding.count({
+        where: { repositoryId, firstSeenScanId: scanId, severity: "HIGH" },
+      });
+      await postScanCheckRun({
+        owner: payload.owner,
+        repo: payload.repo,
+        commitSha: payload.commitSha,
+        installationId: payload.installationId,
+        newCriticalCount: newCritical,
+        newHighCount: newHigh,
+        totalAssets: allAssets.length,
+        quantumVulnerableCount,
+      });
+      await appendLog(scanId, "INFO", "Posted GitHub Check Run");
+    }
+
+    await appendLog(scanId, "INFO", `Scan complete${result.truncated ? " (truncated by scan caps)" : ""}`);
+    return { assetsWritten, findingsWritten, filesScanned: result.filesScanned };
+  } finally {
+    await checkout.cleanup();
+    await appendLog(scanId, "DEBUG", "Temp checkout cleaned up");
   }
-
-  await appendLog(scanId, "INFO", `[noop-scanner] Wrote ${assetsWritten} crypto assets`);
-  await appendLog(scanId, "INFO", "[noop-scanner] Running detector: findings");
-
-  // Write 0–2 findings
-  const numFindings = Math.floor(Math.random() * 3);
-  let findingsWritten = 0;
-  for (let i = 0; i < numFindings; i++) {
-    const tmpl = pick(NOOP_FINDINGS);
-    await prisma.finding.create({
-      data: {
-        repositoryId,
-        code: tmpl.code,
-        severity: tmpl.severity,
-        title: tmpl.title,
-        detail: tmpl.detail,
-        status: "OPEN",
-        affectedComponent: "noop-scanner",
-        firstSeenScanId: scanId,
-        lastSeenScanId: scanId,
-      },
-    });
-    findingsWritten++;
-  }
-
-  await appendLog(scanId, "INFO", `[noop-scanner] Wrote ${findingsWritten} findings`);
-  await appendLog(scanId, "INFO", "[noop-scanner] Scan complete");
-  return { assetsWritten, findingsWritten };
 }
 
-async function appendLog(scanId: string, level: "INFO" | "WARN" | "ERROR", message: string) {
-  await prisma.scanLog.create({ data: { scanId, level, message } });
+function findingTitle(hit: NormalizedHit): string {
+  if (hit.canonicalName === "JWT alg=none") return "JWT signature verification disabled (alg=none)";
+  if (hit.kind === "PROTOCOL") return `Weak protocol configuration: ${hit.canonicalName}`;
+  if (hit.kind === "SECRET") return hit.canonicalName;
+  if (hit.kind === "CERTIFICATE") return `Certificate risk: ${hit.canonicalName}`;
+  if (hit.kind === "KEY") return hit.canonicalName;
+  return `Weak or deprecated algorithm in use: ${hit.canonicalName}`;
+}
+
+function dedupeRecommendations(hits: NormalizedHit[]) {
+  const seen = new Map<string, ReturnType<typeof getRecommendation>>();
+  for (const hit of hits) {
+    const reco = getRecommendation(hit);
+    if (reco && !seen.has(reco.fromAlgorithm)) seen.set(reco.fromAlgorithm, reco);
+  }
+  return [...seen.values()].filter((r): r is NonNullable<typeof r> => r !== null);
+}
+
+async function appendLog(scanId: string, level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string) {
+  await prisma.scanLog.create({ data: { scanId, level, message } }).catch(() => {});
 }

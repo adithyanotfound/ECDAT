@@ -1,0 +1,11 @@
+# Bastion host SSH daemon config — KexAlgorithms line predates the 2017
+# hardening pass and was never revisited since the bastion "just works".
+Port 22
+PermitRootLogin no
+
+KexAlgorithms diffie-hellman-group1-sha1,curve25519-sha256
+Ciphers aes256-ctr,3des-cbc
+MACs hmac-sha2-256,hmac-md5
+
+PasswordAuthentication no
+PubkeyAuthentication yes

@@ -59,11 +59,8 @@ async function processJob(job: { id: string; type: string; payload: unknown }) {
     });
 
     const start = Date.now();
-    const { assetsWritten, findingsWritten } = await runScanner(scanId, repositoryId);
+    const { assetsWritten, findingsWritten, filesScanned } = await runScanner(scanId, repositoryId, payload);
     const durationMs = Date.now() - start;
-
-    // Count files scanned (synthetic for noop scanner)
-    const filesScanned = assetsWritten * 12 + Math.floor(Math.random() * 50);
 
     await prisma.scan.update({
       where: { id: scanId },
@@ -112,7 +109,10 @@ export function startWorker() {
         limit(() => processJob(job)).catch(() => {});
       }
     } catch (err) {
-      console.error("[worker] poll error:", err);
+      // Log only the message, never the raw error object — an Octokit
+      // error can carry the full request (including the Authorization
+      // header with a live installation token) on its `.request` property.
+      console.error("[worker] poll error:", err instanceof Error ? err.message : String(err));
     } finally {
       setTimeout(poll, POLL_INTERVAL_MS);
     }

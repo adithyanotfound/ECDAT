@@ -116,7 +116,8 @@ export default function VulnerabilitiesPage() {
               style={{ color: "var(--color-ink)" }}
             />
           </div>
-          <button
+          <a
+            href="/api/findings/export"
             className="px-4 py-2 rounded-lg text-sm font-medium"
             style={{
               backgroundColor: "var(--color-surface)",
@@ -125,7 +126,7 @@ export default function VulnerabilitiesPage() {
             }}
           >
             Export CSV
-          </button>
+          </a>
         </div>
       </div>
 

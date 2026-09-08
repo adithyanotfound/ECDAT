@@ -14,8 +14,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
 import { verifyWebhookSignature } from "@/server/github/webhook";
 import { enqueueJob } from "@/server/jobs/queue";
+import { isRateLimited } from "@/server/security/rateLimit";
+
+// GitHub's own webhook delivery volume from a single App install is bursty
+// but bounded — this ceiling is generous for legitimate traffic and cheap
+// insurance against a flood (spoofed or not) tying up the job queue.
+const WEBHOOK_RATE_LIMIT = 60;
+const WEBHOOK_RATE_WINDOW_MS = 60_000;
 
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (isRateLimited(`webhook:${ip}`, WEBHOOK_RATE_LIMIT, WEBHOOK_RATE_WINDOW_MS)) {
+    console.warn(`[webhook] rate limit exceeded for ${ip}`);
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   // 1. Read raw body — must happen before any JSON.parse
   const rawBody = await req.text();
 
@@ -55,7 +68,9 @@ export async function POST(req: NextRequest) {
       console.log(`[webhook] unhandled event: ${event}`);
     }
   } catch (err) {
-    console.error(`[webhook] handler error for ${event}:`, err);
+    // Message only — never the raw error, which can carry a live
+    // installation token on an Octokit error's `.request` property.
+    console.error(`[webhook] handler error for ${event}:`, err instanceof Error ? err.message : String(err));
     // Still return 200 to prevent GitHub from retrying with duplicate delivery IDs
   }
 
