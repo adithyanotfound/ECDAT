@@ -1,0 +1,351 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum ScanTrigger {
+  INITIAL
+  PUSH
+  MANUAL
+}
+
+enum ScanStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MODERATE
+  LOW
+  COMPLIANT
+}
+
+enum CryptoKind {
+  ALGORITHM
+  CERTIFICATE
+  KEY
+  PROTOCOL
+  LIBRARY
+  SECRET
+}
+
+enum FindingStatus {
+  OPEN
+  MITIGATED
+  ACCEPTED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum Criticality {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  githubId  Int      @unique
+  login     String
+  avatarUrl String?
+  email     String?
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Installation ─────────────────────────────────────────────────────────────
+
+model Installation {
+  id                    String       @id @default(cuid())
+  githubInstallationId  Int          @unique
+  accountLogin          String
+  accountType           String       // "User" | "Organization"
+  avatarUrl             String?
+  suspendedAt           DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  repositories          Repository[]
+}
+
+// ─── Repository ───────────────────────────────────────────────────────────────
+
+model Repository {
+  id                 String       @id @default(cuid())
+  installationId     String
+  githubRepoId       Int          @unique
+  fullName           String       @unique
+  owner              String
+  name               String
+  defaultBranch      String       @default("main")
+  language           String?
+  isPrivate          Boolean      @default(true)
+  scanEnabled        Boolean      @default(true)
+  dataLifetimeYears  Int          @default(5)
+  criticality        Criticality  @default(MEDIUM)
+  webhookSecret      String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  installation       Installation @relation(fields: [installationId], references: [id])
+  scans              Scan[]
+  cryptoAssets       CryptoAsset[]
+  findings           Finding[]
+  recommendations    Recommendation[]
+
+  @@index([installationId])
+  @@index([fullName])
+}
+
+// ─── ScanProfile ──────────────────────────────────────────────────────────────
+
+model ScanProfile {
+  id             String   @id @default(cuid())
+  name           String
+  rulePackIds    String[]
+  includeGlobs   String[]
+  excludeGlobs   String[]
+  maxFileSizeKb  Int      @default(1024)
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  scans          Scan[]
+}
+
+// ─── Scan ─────────────────────────────────────────────────────────────────────
+
+model Scan {
+  id            String      @id @default(cuid())
+  repositoryId  String
+  profileId     String?
+  trigger       ScanTrigger
+  status        ScanStatus  @default(QUEUED)
+  commitSha     String
+  ref           String
+  durationMs    Int?
+  filesScanned  Int?
+  errorMessage  String?
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  repository    Repository  @relation(fields: [repositoryId], references: [id])
+  profile       ScanProfile? @relation(fields: [profileId], references: [id])
+  logs          ScanLog[]
+  cbom          Cbom?
+  firstSeenAssets CryptoAsset[] @relation("FirstSeenScan")
+  lastSeenAssets  CryptoAsset[] @relation("LastSeenScan")
+  firstSeenFindings Finding[] @relation("FirstSeenFinding")
+  lastSeenFindings  Finding[] @relation("LastSeenFinding")
+
+  @@index([repositoryId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+// ─── ScanLog ──────────────────────────────────────────────────────────────────
+
+model ScanLog {
+  id      String   @id @default(cuid())
+  scanId  String
+  ts      DateTime @default(now())
+  level   LogLevel @default(INFO)
+  message String
+
+  scan    Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, ts])
+}
+
+// ─── CryptoAsset ──────────────────────────────────────────────────────────────
+
+model CryptoAsset {
+  id                   String      @id @default(cuid())
+  repositoryId         String
+  fingerprint          String
+  kind                 CryptoKind
+  name                 String
+  primitive            String?
+  algorithm            String?
+  keyLengthBits        Int?
+  mode                 String?
+  padding              String?
+  curve                String?
+  nistQuantumLevel     Int?        // 0 = not quantum safe, 1–5 = NIST security level
+  quantumSafe          Boolean?
+  executionEnvironment String?
+  classicalSecLevel    Int?
+  filePath             String
+  lineNumber           Int?
+  usageCount           Int         @default(1)
+  ruleId               String?
+  firstSeenScanId      String
+  lastSeenScanId       String
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  repository     Repository   @relation(fields: [repositoryId], references: [id])
+  firstSeenScan  Scan         @relation("FirstSeenScan", fields: [firstSeenScanId], references: [id])
+  lastSeenScan   Scan         @relation("LastSeenScan", fields: [lastSeenScanId], references: [id])
+  riskAssessment RiskAssessment?
+  findings       FindingAsset[]
+
+  @@unique([repositoryId, fingerprint])
+  @@index([repositoryId, kind])
+  @@index([repositoryId, quantumSafe])
+}
+
+// ─── RiskAssessment ───────────────────────────────────────────────────────────
+
+model RiskAssessment {
+  id              String  @id @default(cuid())
+  cryptoAssetId   String  @unique
+  crsfScore       Int     @default(0)  // 0–100
+  cisScore        Float   @default(0)
+  pqcSafetyScore  Int     @default(0)  // 0–10
+  riskCategory    String  @default("SAFE") // SAFE | LOW | MODERATE | HIGH | CRITICAL
+  moscaX          Int     @default(5)  // data lifetime years
+  moscaY          Int     @default(3)  // migration time years
+  moscaZ          Int     @default(7)  // years to CRQC
+  moscaVerdict    String  @default("SAFE") // ACT_NOW | PLAN | SAFE
+  cisExplanation  String?
+
+  cryptoAsset     CryptoAsset @relation(fields: [cryptoAssetId], references: [id], onDelete: Cascade)
+}
+
+// ─── Finding ──────────────────────────────────────────────────────────────────
+
+model Finding {
+  id                String        @id @default(cuid())
+  repositoryId      String
+  code              String
+  severity          Severity
+  title             String
+  detail            String
+  remediation       String?
+  status            FindingStatus @default(OPEN)
+  cweId             String?
+  nistRef           String?
+  affectedComponent String?
+  filePath          String?
+  lineNumber        Int?
+  firstSeenScanId   String
+  lastSeenScanId    String
+  firstSeenAt       DateTime      @default(now())
+  lastSeenAt        DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  repository      Repository   @relation(fields: [repositoryId], references: [id])
+  firstSeenScan   Scan         @relation("FirstSeenFinding", fields: [firstSeenScanId], references: [id])
+  lastSeenScan    Scan         @relation("LastSeenFinding", fields: [lastSeenScanId], references: [id])
+  assets          FindingAsset[]
+
+  @@index([repositoryId, severity])
+  @@index([repositoryId, status])
+  @@index([code])
+}
+
+// ─── FindingAsset (M:N join) ──────────────────────────────────────────────────
+
+model FindingAsset {
+  findingId     String
+  cryptoAssetId String
+
+  finding       Finding     @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  cryptoAsset   CryptoAsset @relation(fields: [cryptoAssetId], references: [id], onDelete: Cascade)
+
+  @@id([findingId, cryptoAssetId])
+}
+
+// ─── Recommendation ───────────────────────────────────────────────────────────
+
+model Recommendation {
+  id             String  @id @default(cuid())
+  repositoryId   String
+  fromAlgorithm  String
+  toAlgorithm    String
+  standard       String?
+  effort         String  @default("MEDIUM") // LOW | MEDIUM | HIGH
+  latencyImpact  String?
+  sizeImpact     String?
+  notes          String?
+
+  repository     Repository @relation(fields: [repositoryId], references: [id])
+
+  @@index([repositoryId])
+}
+
+// ─── Cbom ─────────────────────────────────────────────────────────────────────
+
+model Cbom {
+  id        String   @id @default(cuid())
+  scanId    String   @unique
+  spec      String   @default("1.6")
+  json      Json
+  createdAt DateTime @default(now())
+
+  scan      Scan     @relation(fields: [scanId], references: [id])
+}
+
+// ─── WebhookDelivery (idempotency) ────────────────────────────────────────────
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  deliveryId  String   @unique
+  event       String
+  payload     Json?
+  processedAt DateTime @default(now())
+
+  @@index([deliveryId])
+}
+
+// ─── Job (DB-backed queue) ────────────────────────────────────────────────────
+
+model Job {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  status      JobStatus @default(QUEUED)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  runAfter    DateTime  @default(now())
+  lockedBy    String?
+  lockedAt    DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, runAfter])
+}
