@@ -3,6 +3,7 @@ import { dashboardAggregates as fixtureDashboard } from "@/fixtures/dashboard";
 import { StatCard } from "@/components/ui/StatCard";
 import { ReadinessGauge } from "@/components/charts/ReadinessGauge";
 import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
+import { RecommendationsTable } from "@/components/dashboard/RecommendationsTable";
 import { getDashboardAggregates } from "@/server/db/dashboard";
 import type { DashboardAggregates } from "@/fixtures/types";
 
@@ -32,46 +33,9 @@ export default async function DashboardPage() {
           Dashboard
         </h1>
         <div className="flex items-center gap-3">
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "140px",
-            }}
-          >
-            <span>Source Type</span>
-            <span className="ml-auto" style={{ color: "var(--color-ink-faint)" }}>▼</span>
+          <div className="text-sm font-medium" style={{ color: "var(--color-ink-muted)" }}>
+            Last scan: {new Date().toLocaleDateString()}
           </div>
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "140px",
-            }}
-          >
-            <span>Last Discovered</span>
-            <span className="ml-auto" style={{ color: "var(--color-ink-faint)" }}>▼</span>
-          </div>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            Submit
-          </button>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-            }}
-          >
-            Reset Charts
-          </button>
         </div>
       </div>
 
@@ -125,6 +89,9 @@ export default async function DashboardPage() {
         symmetricKeyDistribution={d.symmetricKeyDistribution}
         asymmetricKeyDistribution={d.asymmetricKeyDistribution}
       />
+
+      {/* Recommendations Table */}
+      <RecommendationsTable />
     </div>
   );
 }

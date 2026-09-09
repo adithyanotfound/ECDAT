@@ -54,22 +54,16 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
     const es = new EventSource(`/api/scans/${scanId}/logs/stream`);
     esRef.current = es;
 
-    es.onmessage = (e) => {
-      const entry = JSON.parse(e.data) as LogEntry;
-      setLogs((prev) => [...prev, entry]);
-      // Auto-scroll to bottom
+    const handleLog = (data: string) => {
+      const entry = JSON.parse(data) as LogEntry;
+      setLogs((prev) => prev.some(l => l.id === entry.id) ? prev : [...prev, entry]);
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
       }, 50);
     };
 
-    es.addEventListener("log", (e) => {
-      const entry = JSON.parse((e as MessageEvent).data) as LogEntry;
-      setLogs((prev) => [...prev, entry]);
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-      }, 50);
-    });
+    es.onmessage = (e) => handleLog(e.data);
+    es.addEventListener("log", (e) => handleLog((e as MessageEvent).data));
 
     es.addEventListener("done", (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { status: string };
@@ -102,14 +96,12 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
         onClick={onClose}
       />
 
-      {/* Drawer */}
+      {/* Modal */}
       <div
-        className="fixed right-0 top-0 bottom-0 z-50 flex flex-col"
+        className="fixed inset-4 md:inset-8 z-50 flex flex-col rounded-xl overflow-hidden shadow-2xl"
         style={{
-          width: "520px",
           backgroundColor: "var(--color-surface)",
-          borderLeft: "1px solid var(--color-border)",
-          boxShadow: "-16px 0 48px rgba(0,0,0,0.4)",
+          border: "1px solid var(--color-border)",
         }}
       >
         {/* Header */}

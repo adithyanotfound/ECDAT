@@ -16,6 +16,18 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const code = searchParams.get("code");
   const state = searchParams.get("state");
+  const installationId = searchParams.get("installation_id");
+  const setupAction = searchParams.get("setup_action");
+
+  // If this is actually an app setup redirect (Setup URL misconfigured as Callback URL)
+  if (installationId && setupAction) {
+    return NextResponse.redirect(
+      new URL(
+        `/api/github/setup?installation_id=${installationId}&setup_action=${setupAction}`,
+        process.env.NEXT_PUBLIC_APP_URL || req.url
+      )
+    );
+  }
 
   // CSRF check
   const cookieStore = await cookies();
@@ -23,7 +35,7 @@ export async function GET(req: NextRequest) {
   cookieStore.delete("oauth_state");
 
   if (!code || !state || state !== savedState) {
-    return NextResponse.redirect(new URL("/login?error=invalid_state", req.url));
+    return NextResponse.redirect(new URL("/login?error=invalid_state", process.env.NEXT_PUBLIC_APP_URL || req.url));
   }
 
   try {
@@ -44,7 +56,7 @@ export async function GET(req: NextRequest) {
     const tokenData = await tokenRes.json() as { access_token?: string; error?: string };
     if (!tokenData.access_token) {
       console.error("[callback] token exchange failed:", tokenData.error);
-      return NextResponse.redirect(new URL("/login?error=token_exchange", req.url));
+      return NextResponse.redirect(new URL("/login?error=token_exchange", process.env.NEXT_PUBLIC_APP_URL || req.url));
     }
 
     // Fetch GitHub user profile
@@ -88,13 +100,13 @@ export async function GET(req: NextRequest) {
       name: ghUser.name,
     });
 
-    const response = NextResponse.redirect(new URL("/dashboard", req.url));
+    const response = NextResponse.redirect(new URL("/dashboard", process.env.NEXT_PUBLIC_APP_URL || req.url));
     response.headers.set("Set-Cookie", makeSessionCookie(token));
     return response;
   } catch (err) {
     // Message only — never the raw error, which can carry a live token on
     // an Octokit error's `.request` property.
     console.error("[callback] error:", err instanceof Error ? err.message : String(err));
-    return NextResponse.redirect(new URL("/login?error=server_error", req.url));
+    return NextResponse.redirect(new URL("/login?error=server_error", process.env.NEXT_PUBLIC_APP_URL || req.url));
   }
 }

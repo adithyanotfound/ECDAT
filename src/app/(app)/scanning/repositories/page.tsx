@@ -68,29 +68,40 @@ export default function RepositoriesPage() {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState<Record<string, boolean>>({});
 
-  const load = () => {
-    setLoading(true);
-    fetch("/api/repositories")
-      .then((r) => r.json())
-      .then((data) => setRepos(Array.isArray(data) ? data : []))
-      .catch(() => setRepos([]))
-      .finally(() => setLoading(false));
+  const load = async () => {
+    try {
+      const r = await fetch("/api/repositories");
+      const data = await r.json();
+      setRepos(Array.isArray(data) ? data : []);
+    } catch {
+      setRepos([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { 
+    load(); 
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const triggerScan = async (repoId: string) => {
     setScanning((s) => ({ ...s, [repoId]: true }));
     try {
       const res = await fetch(`/api/repositories/${repoId}/scan`, { method: "POST" });
       if (res.ok) {
-        // Refresh list after a short delay so status updates
-        setTimeout(load, 1000);
+        const data = await res.json();
+        alert(`Scan Queued!\nScan ID: ${data.scanId}\n\nGo to the 'Scans' tab in the sidebar to view live logs.`);
+        load();
       }
     } catch {
       // ignore
     } finally {
-      setTimeout(() => setScanning((s) => ({ ...s, [repoId]: false })), 2000);
+      setScanning((s) => ({ ...s, [repoId]: false }));
     }
   };
 

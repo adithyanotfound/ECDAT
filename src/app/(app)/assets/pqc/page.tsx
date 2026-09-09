@@ -43,6 +43,29 @@ const columns: ColumnDef<CryptoAsset>[] = [
     getValue: (row) => row.keyLengthBits ?? 0,
   },
   {
+    key: "moscaVerdict",
+    header: "Mosca Verdict",
+    sortable: true,
+    width: "120px",
+    render: (row) => {
+      const v = row.moscaVerdict ?? (row.quantumSafe ? "SAFE" : "PLAN");
+      const c = v === "ACT_NOW" ? "#F0516B" : v === "PLAN" ? "#F2C14E" : "#3FCF8E";
+      return (
+        <span
+          className="text-xs px-2 py-0.5 rounded-full font-semibold"
+          style={{
+            backgroundColor: `${c}1a`,
+            color: c,
+            border: `1px solid ${c}44`,
+          }}
+        >
+          {v.replace("_", " ")}
+        </span>
+      );
+    },
+    getValue: (row) => row.moscaVerdict ?? (row.quantumSafe ? "SAFE" : "PLAN"),
+  },
+  {
     key: "crsfScore",
     header: "CRSF Score",
     sortable: true,
@@ -278,37 +301,7 @@ export default function PqcPage() {
         </div>
       </div>
 
-      {/* Filter row */}
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: "var(--color-ink-muted)" }}>Algorithm</label>
-          <div
-            className="rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "120px",
-            }}
-          >
-            All
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: "var(--color-ink-muted)" }}>CRSF Score</label>
-          <div
-            className="rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "120px",
-            }}
-          >
-            All
-          </div>
-        </div>
-      </div>
+
 
       <DataTable
         data={algorithms}
@@ -322,14 +315,6 @@ export default function PqcPage() {
 
       <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
         Showing 1 to {Math.min(algorithms.length, 11)} of {algorithms.length} records
-        &nbsp;&nbsp;Page Size:{" "}
-        <select
-          className="rounded px-1 py-0.5 text-xs"
-          style={{ backgroundColor: "var(--color-surface-2)", color: "var(--color-ink-muted)", border: "1px solid var(--color-border)" }}
-        >
-          <option>20</option>
-          <option>50</option>
-        </select>
       </p>
 
       {/* Detail drawer */}

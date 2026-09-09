@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const setupAction = searchParams.get("setup_action");
 
   if (!installationId || isNaN(installationId)) {
-    return NextResponse.redirect(new URL("/scanning/repositories?error=missing_installation", req.url));
+    return NextResponse.redirect(new URL("/scanning/repositories?error=missing_installation", process.env.NEXT_PUBLIC_APP_URL || req.url));
   }
 
   // Handle revocation
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
       where: { installation: { githubInstallationId: installationId } },
       data: { scanEnabled: false },
     });
-    return NextResponse.redirect(new URL("/scanning/repositories?uninstalled=1", req.url));
+    return NextResponse.redirect(new URL("/scanning/repositories?uninstalled=1", process.env.NEXT_PUBLIC_APP_URL || req.url));
   }
 
   try {
@@ -128,12 +128,12 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return NextResponse.redirect(new URL("/scanning/repositories?connected=1", req.url));
+    return NextResponse.redirect(new URL("/scanning/repositories?connected=1", process.env.NEXT_PUBLIC_APP_URL || req.url));
   } catch (err) {
     // Message only — never the raw error, which can carry a live
     // installation token on an Octokit error's `.request` property.
     console.error("[setup] error:", err instanceof Error ? err.message : String(err));
-    return NextResponse.redirect(new URL("/scanning/repositories?error=setup_failed", req.url));
+    return NextResponse.redirect(new URL("/scanning/repositories?error=setup_failed", process.env.NEXT_PUBLIC_APP_URL || req.url));
   }
 }
 

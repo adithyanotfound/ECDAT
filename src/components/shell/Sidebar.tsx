@@ -22,6 +22,7 @@ import {
   GitBranch,
   Cpu,
   Network,
+  Lightbulb,
 } from "lucide-react";
 
 interface NavItem {
@@ -64,9 +65,9 @@ const navItems: NavItem[] = [
     icon: <Package size={16} />,
     children: [
       {
-        label: "Inventory",
-        href: "/assets/inventory",
-        icon: <List size={14} />,
+        label: "Recommendations",
+        href: "/assets/recommendations",
+        icon: <Lightbulb size={14} />,
       },
       {
         label: "PQC",
@@ -80,37 +81,14 @@ const navItems: NavItem[] = [
       },
     ],
   },
-  {
-    label: "Reports",
-    href: "/reports",
-    icon: <FileText size={16} />,
-  },
+
 ];
 
 const bottomNavItems: NavItem[] = [
   {
-    label: "Knowledge",
-    href: "/knowledge",
-    icon: <BookOpen size={16} />,
-    disabled: true,
-  },
-  {
-    label: "Settings",
-    href: "/settings",
-    icon: <Settings size={16} />,
-    disabled: true,
-  },
-  {
-    label: "Users",
-    href: "/users",
-    icon: <Users size={16} />,
-    disabled: true,
-  },
-  {
     label: "Logout",
-    href: "/logout",
+    href: "/api/auth/logout",
     icon: <LogOut size={16} />,
-    disabled: true,
   },
 ];
 
@@ -272,9 +250,18 @@ export function Sidebar({ collapsed }: SidebarProps) {
           <button
             key={item.label}
             disabled={item.disabled}
+            onClick={async () => {
+              if (item.label === "Logout") {
+                try {
+                  await fetch("/api/auth/logout", { method: "POST" });
+                } finally {
+                  window.location.href = "/login";
+                }
+              }
+            }}
             className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 mb-1"
             style={{
-              color: "var(--color-ink-faint)",
+              color: item.disabled ? "var(--color-ink-faint)" : "var(--color-ink-muted)",
               backgroundColor: "transparent",
               opacity: item.disabled ? 0.6 : 1,
               cursor: item.disabled ? "default" : "pointer",

@@ -24,12 +24,6 @@ export default async function ProfilesPage() {
         <h1 className="text-2xl font-bold" style={{ color: "var(--color-ink)" }}>
           Scan Profiles
         </h1>
-        <button
-          className="px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-        >
-          + New Profile
-        </button>
       </div>
 
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>

@@ -109,9 +109,99 @@ export default function CbomReportPage() {
   const strongAlgos = algoComponents.filter((c) => (c.cryptoProperties.algorithmProperties?.nistQuantumSecurityLevel ?? 0) > 0);
   const weakAlgos = algoComponents.filter((c) => (c.cryptoProperties.algorithmProperties?.nistQuantumSecurityLevel ?? 0) === 0);
 
+  const generatePDF = () => {
+    if (!report) return;
+    import("jspdf").then(({ default: jsPDF }) => {
+      import("jspdf-autotable").then(({ default: autoTable }) => {
+        const doc = new jsPDF("p", "pt", "a4");
+        
+        // Header
+        doc.setFontSize(18);
+        doc.text(`CBOM Report: ${report.repositoryFullName}`, 40, 40);
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.text(`Commit: ${report.commitSha} | Scan: ${new Date(report.completedAt).toLocaleString()}`, 40, 55);
+
+        // Component Table
+        doc.setFontSize(14);
+        doc.setTextColor(0);
+        doc.text("Component Details", 40, 80);
+        autoTable(doc, {
+          startY: 90,
+          head: [["Name", "Type", "Version", "Cryptographic Assets"]],
+          body: [[
+            report.cbom.metadata.component.name || "", 
+            "Application", 
+            report.cbom.metadata.component.version || "", 
+            components.length.toString()
+          ]],
+          theme: "grid",
+        });
+
+        // Assets Table
+        doc.setFontSize(14);
+        doc.text("Cryptographic Assets", 40, (doc as any).lastAutoTable.finalY + 30);
+        autoTable(doc, {
+          startY: (doc as any).lastAutoTable.finalY + 40,
+          head: [["Component", "Type", "Primitive", "Key Length", "PQC Safe?", "Reference"]],
+          body: components.map(c => {
+            const ap = c.cryptoProperties.algorithmProperties;
+            const safe = (ap?.nistQuantumSecurityLevel ?? 0) > 0;
+            return [
+              c.name,
+              c.cryptoProperties.assetType,
+              ap?.primitive ?? "—",
+              ap?.parameterSetIdentifier ?? "—",
+              safe ? "Yes" : "No",
+              c.evidence.occurrences[0]?.location ?? "N/A"
+            ];
+          }),
+          theme: "grid",
+          styles: { fontSize: 9 },
+          headStyles: { fillColor: [47, 91, 255] }
+        });
+
+        // Vulnerabilities
+        doc.setFontSize(14);
+        doc.text("Vulnerabilities", 40, (doc as any).lastAutoTable.finalY + 30);
+        autoTable(doc, {
+          startY: (doc as any).lastAutoTable.finalY + 40,
+          head: [["ID", "Severity", "Title", "Affected Component"]],
+          body: findings.map(f => [
+            f.code,
+            f.severity,
+            f.title,
+            f.affectedComponent
+          ]),
+          theme: "grid",
+          styles: { fontSize: 9 },
+          headStyles: { fillColor: [47, 91, 255] }
+        });
+
+        doc.save(`${report.repositoryFullName.replace(/\\//g, "-")}-cbom.pdf`);
+      });
+    });
+  };
+
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
-      <style>{`@media print { .no-print { display: none !important; } }`}</style>
+      <style>{`
+        @media print {
+          .no-print, aside, header { display: none !important; }
+          body, main, .flex-1, .app-container {
+            background: white !important;
+            color: black !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+          }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          @page { margin: 1.5cm; }
+          .rounded-xl, .rounded-t-xl, .rounded-b-xl { border-radius: 4px !important; }
+          table, th, td { border-color: #ddd !important; }
+        }
+      `}</style>
 
       {/* Title & selector row */}
       <div className="no-print">
@@ -172,7 +262,7 @@ export default function CbomReportPage() {
             </div>
             <div className="flex items-center gap-3 no-print">
               <button
-                onClick={() => window.print()}
+                onClick={generatePDF}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
                 style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}
               >

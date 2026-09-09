@@ -41,8 +41,8 @@ export default function ScansPage() {
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
-    async (p: number, q: string) => {
-      setLoading(true);
+    async (p: number, q: string, background = false) => {
+      if (!background) setLoading(true);
       try {
         const url = new URL("/api/scans", window.location.origin);
         url.searchParams.set("page", String(p));
@@ -62,6 +62,14 @@ export default function ScansPage() {
   useEffect(() => {
     fetchPage(page, search);
   }, [page, fetchPage]);
+
+  // Auto-polling for active scans
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchPage(page, search, true);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [page, search, fetchPage]);
 
   // Debounce search
   useEffect(() => {
@@ -122,12 +130,6 @@ export default function ScansPage() {
               style={{ color: "var(--color-ink)" }}
             />
           </div>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            + New Scan
-          </button>
         </div>
       </div>
 
