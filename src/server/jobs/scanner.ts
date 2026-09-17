@@ -1,106 +1,148 @@
 /**
- * No-op scanner — Phase 3 placeholder.
- * Writes plausible CryptoAsset, RiskAssessment and Finding rows so the
- * full job loop is provably working before Phase 4 plugs in the real engine.
+ * Scanner entry point.
  *
- * Phase 4 will replace runScanner() with the real detector pipeline.
+ * Phase 4, Step 1 made the first real operation a repository checkout:
+ * fetchRepoTarball() downloads and securely extracts the tarball for the
+ * scanned commit into a temp directory before anything else runs, and that
+ * directory is always cleaned up afterwards regardless of scan outcome.
+ *
+ * Phase 4, Step 2 replaced the old no-op placeholder with the real JS/TS
+ * cryptographic call-site detector, running against the checked-out tree.
+ *
+ * Phase 4, Step 3 added the npm manifest/dependency crypto-library detector
+ * alongside it (additive — the Step 2 detector is unchanged).
+ *
+ * Phase 4, Step 4 adds the certificate/key detector (standalone
+ * .pem/.crt/.cer/.der/.key/.p12/.pfx/.jks files only).
+ *
+ * Phase 4, Step 5 adds the risk scoring pass, run once after all three
+ * detectors, over the union of CryptoAsset IDs they touched this scan.
+ * Scoring never rescans the repository's entire historical asset
+ * inventory — only what changed/was seen in this pass.
  */
+import { rm } from "node:fs/promises";
 import { prisma } from "@/server/db/client";
-
-const NOOP_ALGOS = [
-  { name: "AES-256-GCM", primitive: "block-cipher", key: 256, mode: "GCM", qs: true, crsf: 3, pqc: 9 },
-  { name: "RSA-2048", primitive: "signature", key: 2048, qs: false, crsf: 48, pqc: 4 },
-  { name: "SHA-256", primitive: "hash", key: 256, qs: true, crsf: 5, pqc: 8 },
-  { name: "3DES", primitive: "block-cipher", key: 168, mode: "CBC", qs: false, crsf: 85, pqc: 1 },
-  { name: "HMAC-SHA256", primitive: "mac", key: 256, qs: true, crsf: 8, pqc: 8 },
-  { name: "ECDSA-P256", primitive: "signature", key: 256, qs: false, crsf: 40, pqc: 4 },
-];
-
-const NOOP_FINDINGS = [
-  { code: "NOOP-PQC-001", severity: "MODERATE" as const, title: "No post-quantum key exchange detected", detail: "Repository has no PQC or hybrid key exchange. Add ML-KEM-768 or X25519MLKEM768." },
-  { code: "NOOP-HASH-001", severity: "HIGH" as const, title: "Weak hash function in use", detail: "SHA-1 or MD5 detected. Migrate to SHA-256 or SHA3-256." },
-];
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+import { fetchRepoTarball } from "./checkout";
+import { runJsTsCryptoDetector } from "@/server/detectors/js-crypto-detector";
+import { runManifestDetector } from "@/server/detectors/manifest-detector";
+import { runCertKeyDetector } from "@/server/detectors/certkey-detector";
+import { runScoringPass } from "@/server/scoring/engine";
+import type { ScanJobPayload } from "./queue";
 
 export async function runScanner(
-  scanId: string,
-  repositoryId: string
+  payload: ScanJobPayload
 ): Promise<{ assetsWritten: number; findingsWritten: number }> {
-  await appendLog(scanId, "INFO", "[noop-scanner] Phase 3 placeholder — writing synthetic rows");
-  await appendLog(scanId, "INFO", "[noop-scanner] Running detector: algorithms");
+  const { scanId, repositoryId, owner, repo, ref } = payload;
 
-  const numAssets = 6 + Math.floor(Math.random() * 6);
-  let assetsWritten = 0;
+  const { dir, fileCount, skippedFileCount } = await fetchRepoTarball(payload, (level, message) =>
+    appendLog(scanId, level, message)
+  );
 
-  for (let i = 0; i < numAssets; i++) {
-    const algo = pick(NOOP_ALGOS);
-    const filePath = `/src/${pick(["crypto", "auth", "utils"])}/${pick(["cipher", "hash", "key"])}.ts`;
-    const fingerprint = `${repositoryId}-${algo.name}-${filePath}-noop`;
-
-    await prisma.cryptoAsset.upsert({
-      where: { repositoryId_fingerprint: { repositoryId, fingerprint } },
-      create: {
-        repositoryId,
-        fingerprint,
-        kind: "ALGORITHM",
-        name: algo.name,
-        primitive: algo.primitive,
-        algorithm: algo.name,
-        keyLengthBits: algo.key,
-        mode: algo.mode ?? null,
-        quantumSafe: algo.qs,
-        executionEnvironment: "software-plain-ram",
-        filePath,
-        usageCount: 1,
-        firstSeenScanId: scanId,
-        lastSeenScanId: scanId,
-        riskAssessment: {
-          create: {
-            crsfScore: algo.crsf,
-            cisScore: 100 - algo.crsf,
-            pqcSafetyScore: algo.pqc,
-            riskCategory: algo.crsf >= 70 ? "CRITICAL" : algo.crsf >= 45 ? "HIGH" : algo.crsf >= 20 ? "MODERATE" : "SAFE",
-          },
-        },
-      },
-      update: {
-        lastSeenScanId: scanId,
-        usageCount: { increment: 1 },
-      },
-    });
-    assetsWritten++;
+  await appendLog(scanId, "INFO", `[scanner] fetched ${fileCount} files for ${owner}/${repo}@${ref}`);
+  if (skippedFileCount > 0) {
+    await appendLog(
+      scanId,
+      "INFO",
+      `[scanner] skipped ${skippedFileCount} files because they exceeded the file-size limit`
+    );
   }
 
-  await appendLog(scanId, "INFO", `[noop-scanner] Wrote ${assetsWritten} crypto assets`);
-  await appendLog(scanId, "INFO", "[noop-scanner] Running detector: findings");
+  try {
+    // ── JS/TS call-site detector (Phase 4, Step 2) ─────────────────────────
+    await appendLog(scanId, "INFO", "[scanner] starting JS/TS crypto detection");
 
-  // Write 0–2 findings
-  const numFindings = Math.floor(Math.random() * 3);
-  let findingsWritten = 0;
-  for (let i = 0; i < numFindings; i++) {
-    const tmpl = pick(NOOP_FINDINGS);
-    await prisma.finding.create({
-      data: {
-        repositoryId,
-        code: tmpl.code,
-        severity: tmpl.severity,
-        title: tmpl.title,
-        detail: tmpl.detail,
-        status: "OPEN",
-        affectedComponent: "noop-scanner",
-        firstSeenScanId: scanId,
-        lastSeenScanId: scanId,
-      },
+    const jsResult = await runJsTsCryptoDetector({
+      dir,
+      repositoryId,
+      scanId,
+      onLog: (level, message) => appendLog(scanId, level, message),
     });
-    findingsWritten++;
-  }
 
-  await appendLog(scanId, "INFO", `[noop-scanner] Wrote ${findingsWritten} findings`);
-  await appendLog(scanId, "INFO", "[noop-scanner] Scan complete");
-  return { assetsWritten, findingsWritten };
+    await appendLog(scanId, "INFO", `[scanner] scanned ${jsResult.filesScanned} JS/TS files`);
+    if (jsResult.filesSkipped > 0) {
+      await appendLog(
+        scanId,
+        "INFO",
+        `[scanner] skipped ${jsResult.filesSkipped} JS/TS files because they exceeded the detector size limit`
+      );
+    }
+    await appendLog(scanId, "INFO", `[scanner] detected ${jsResult.detectionsFound} crypto call sites`);
+    await appendLog(scanId, "INFO", `[scanner] upserted ${jsResult.assetsUpserted} crypto assets`);
+
+    // ── npm manifest/dependency detector (Phase 4, Step 3) ─────────────────
+    await appendLog(scanId, "INFO", "[scanner] starting npm manifest crypto-library detection");
+
+    const manifestResult = await runManifestDetector({
+      dir,
+      repositoryId,
+      scanId,
+      onLog: (level, message) => appendLog(scanId, level, message),
+    });
+
+    await appendLog(scanId, "INFO", `[manifest] found ${manifestResult.manifestsScanned} package.json manifests`);
+    if (manifestResult.manifestsSkipped > 0) {
+      await appendLog(
+        scanId,
+        "INFO",
+        `[manifest] skipped ${manifestResult.manifestsSkipped} malformed or unreadable manifests`
+      );
+    }
+    await appendLog(scanId, "INFO", `[manifest] matched ${manifestResult.librariesMatched} known crypto libraries`);
+    await appendLog(scanId, "INFO", `[manifest] upserted ${manifestResult.assetsUpserted} crypto assets`);
+
+    // ── certificate/key detector (Phase 4, Step 4) ─────────────────────────
+    await appendLog(scanId, "INFO", "[scanner] starting certificate/key detection");
+
+    const certKeyResult = await runCertKeyDetector({
+      dir,
+      repositoryId,
+      scanId,
+      onLog: (level, message) => appendLog(scanId, level, message),
+    });
+
+    await appendLog(scanId, "INFO", `[certkey] scanned ${certKeyResult.filesScanned} certificate/key files`);
+    if (certKeyResult.filesSkipped > 0) {
+      await appendLog(
+        scanId,
+        "INFO",
+        `[certkey] skipped ${certKeyResult.filesSkipped} files because they exceeded the size limit or could not be read`
+      );
+    }
+    await appendLog(scanId, "INFO", `[certkey] found ${certKeyResult.certificatesFound} certificates`);
+    await appendLog(scanId, "INFO", `[certkey] found ${certKeyResult.keysFound} keys`);
+    if (certKeyResult.unparsedBundlesFound > 0) {
+      await appendLog(scanId, "INFO", `[certkey] found ${certKeyResult.unparsedBundlesFound} unparsed PKCS#12/JKS bundles`);
+    }
+    await appendLog(scanId, "INFO", `[certkey] upserted ${certKeyResult.assetsUpserted} crypto assets`);
+
+    // ── risk scoring pass (Phase 4, Step 5) ────────────────────────────────
+    // Union + dedupe every asset touched by the three detectors above, then
+    // score exactly once — never the repository's full historical inventory.
+    const scoredAssetIds = [
+      ...new Set([...jsResult.assetIds, ...manifestResult.assetIds, ...certKeyResult.assetIds]),
+    ];
+
+    await appendLog(scanId, "INFO", "[scanner] starting risk scoring pass");
+
+    await runScoringPass({
+      repositoryId,
+      scanId,
+      assetIds: scoredAssetIds,
+      onLog: (level, message) => appendLog(scanId, level, message),
+    });
+
+    await appendLog(scanId, "INFO", "[scanner] Scan complete");
+
+    // Finding generation is not implemented yet — Steps 2-4 are CryptoAsset
+    // discovery only, and Step 5 is risk scoring only. Finding/CBOM
+    // generation are later phases.
+    return {
+      assetsWritten: jsResult.assetsUpserted + manifestResult.assetsUpserted + certKeyResult.assetsUpserted,
+      findingsWritten: 0,
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function appendLog(scanId: string, level: "INFO" | "WARN" | "ERROR", message: string) {

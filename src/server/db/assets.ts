@@ -289,3 +289,19 @@ export async function getFindingsPage({
 export async function getCbomForScan(scanId: string) {
   return prisma.cbom.findUnique({ where: { scanId } });
 }
+
+/**
+ * The CBOM Report page (src/app/(app)/assets/pqc/cbom/page.tsx) has no
+ * scan-selection mechanism of its own (no query param, no client state —
+ * it currently renders static fixtures). Per Phase 4, Step 6's explicit
+ * fallback instruction, its "Download CBOM" button defaults to the most
+ * recently completed scan across all repositories.
+ */
+export async function getMostRecentCompletedScanId(): Promise<string | null> {
+  const scan = await prisma.scan.findFirst({
+    where: { status: "COMPLETED" },
+    orderBy: { completedAt: "desc" },
+    select: { id: true },
+  });
+  return scan?.id ?? null;
+}

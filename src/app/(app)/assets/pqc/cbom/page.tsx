@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cryptoAssets, findings } from "@/fixtures/assets";
+import { getMostRecentCompletedScanId } from "@/server/db/assets";
 import { SeverityPill, ScorePill } from "@/components/ui/Pill";
 import { Download } from "lucide-react";
 
@@ -74,7 +75,12 @@ const tdStyle: React.CSSProperties = {
   verticalAlign: "middle",
 };
 
-export default function CbomReportPage() {
+export default async function CbomReportPage() {
+  // The page has no scan-selection mechanism of its own (see
+  // getMostRecentCompletedScanId's doc comment) — the Download CBOM button
+  // below defaults to the most recently completed scan across repositories.
+  const scanId = await getMostRecentCompletedScanId();
+
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
       {/* Title & selector row */}
@@ -146,12 +152,24 @@ export default function CbomReportPage() {
           >
             <Download size={13} /> Download PDF
           </button>
-          <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            <Download size={13} /> Download CBOM
-          </button>
+          {scanId ? (
+            <a
+              href={`/api/scans/${scanId}/cbom`}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
+            >
+              <Download size={13} /> Download CBOM
+            </a>
+          ) : (
+            <button
+              disabled
+              title="No completed scans yet"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed"
+              style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
+            >
+              <Download size={13} /> Download CBOM
+            </button>
+          )}
         </div>
       </div>
 
