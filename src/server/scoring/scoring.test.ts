@@ -195,3 +195,36 @@ test("every scoring function is deterministic for identical inputs", () => {
 
   assert.deepEqual(runOnce(), runOnce());
 });
+
+// ─── Phase 5, Step 8 — PROTOCOL and SECRET assets reach scoring without crashing ─
+//
+// The formulas themselves are unchanged (per Step 8's explicit constraint);
+// these confirm the two new CryptoAsset kinds don't crash any of them and
+// produce values within the same documented bounds every other kind does.
+
+test("a PROTOCOL asset (algorithm holds a protocol-version string, not an algorithm) scores without crashing and stays in bounds", () => {
+  const input = makeInput({ kind: "PROTOCOL", algorithm: "TLSv1.1", quantumSafe: null });
+  const crsf = computeCrsfScore(input);
+  const pqc = computePqcSafetyScore(input);
+  const { cisScore } = computeCisConformance(input);
+  const mosca = computeMoscaVerdict(input, FIXED_NOW);
+
+  assert.ok(crsf >= 0 && crsf <= 100);
+  assert.ok(pqc >= 0 && pqc <= 10);
+  assert.ok(cisScore >= 0 && cisScore <= 100);
+  assert.ok(["ACT_NOW", "PLAN", "SAFE"].includes(mosca.moscaVerdict));
+});
+
+test("a SECRET asset (algorithm/keyLengthBits/curve/quantumSafe all null) scores without crashing and stays in bounds", () => {
+  const input = makeInput({ kind: "SECRET", algorithm: null, keyLengthBits: null, curve: null, quantumSafe: null });
+  const crsf = computeCrsfScore(input);
+  const pqc = computePqcSafetyScore(input);
+  const { cisScore, cisExplanation } = computeCisConformance(input);
+  const mosca = computeMoscaVerdict(input, FIXED_NOW);
+
+  assert.ok(crsf >= 0 && crsf <= 100);
+  assert.ok(pqc >= 0 && pqc <= 10);
+  assert.ok(cisScore >= 0 && cisScore <= 100);
+  assert.ok(cisExplanation.length > 0);
+  assert.ok(["ACT_NOW", "PLAN", "SAFE"].includes(mosca.moscaVerdict));
+});

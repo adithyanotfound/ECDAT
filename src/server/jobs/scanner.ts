@@ -19,6 +19,16 @@
  * detectors, over the union of CryptoAsset IDs they touched this scan.
  * Scoring never rescans the repository's entire historical asset
  * inventory — only what changed/was seen in this pass.
+ *
+ * Phase 5, Step 7 adds finding derivation/persistence, run inside that same
+ * scoring pass (src/server/scoring/engine.ts) — findingsWritten below now
+ * reflects real Finding rows created/updated, not a placeholder zero.
+ *
+ * Phase 5, Step 8 adds two more detectors after cert/key: the config/
+ * protocol detector (nginx/sshd_config/Terraform TLS configuration) and the
+ * entropy-gated secrets detector. Both are additive — every earlier
+ * detector is unchanged — and their asset IDs join the same union passed to
+ * the scoring pass, so they're never scored twice and never bypass it.
  */
 import { rm } from "node:fs/promises";
 import { prisma } from "@/server/db/client";
@@ -26,6 +36,8 @@ import { fetchRepoTarball } from "./checkout";
 import { runJsTsCryptoDetector } from "@/server/detectors/js-crypto-detector";
 import { runManifestDetector } from "@/server/detectors/manifest-detector";
 import { runCertKeyDetector } from "@/server/detectors/certkey-detector";
+import { runConfigProtocolDetector } from "@/server/detectors/config-protocol-detector";
+import { runSecretsDetector } from "@/server/detectors/secrets-detector";
 import { runScoringPass } from "@/server/scoring/engine";
 import type { ScanJobPayload } from "./queue";
 
@@ -115,16 +127,66 @@ export async function runScanner(
     }
     await appendLog(scanId, "INFO", `[certkey] upserted ${certKeyResult.assetsUpserted} crypto assets`);
 
+    // ── config/protocol detector (Phase 5, Step 8) ──────────────────────────
+    await appendLog(scanId, "INFO", "[scanner] starting config/protocol detection");
+
+    const configProtocolResult = await runConfigProtocolDetector({
+      dir,
+      repositoryId,
+      scanId,
+      onLog: (level, message) => appendLog(scanId, level, message),
+    });
+
+    await appendLog(scanId, "INFO", `[config-protocol] scanned ${configProtocolResult.filesScanned} config files`);
+    if (configProtocolResult.filesSkipped > 0) {
+      await appendLog(
+        scanId,
+        "INFO",
+        `[config-protocol] skipped ${configProtocolResult.filesSkipped} files because they exceeded the size limit or could not be read`
+      );
+    }
+    await appendLog(scanId, "INFO", `[config-protocol] found ${configProtocolResult.directivesFound} crypto-relevant directives`);
+    await appendLog(scanId, "INFO", `[config-protocol] upserted ${configProtocolResult.assetsUpserted} crypto assets`);
+
+    // ── entropy-gated secrets detector (Phase 5, Step 8) ────────────────────
+    await appendLog(scanId, "INFO", "[scanner] starting entropy-gated secret detection");
+
+    const secretsResult = await runSecretsDetector({
+      dir,
+      repositoryId,
+      scanId,
+      onLog: (level, message) => appendLog(scanId, level, message),
+    });
+
+    await appendLog(scanId, "INFO", `[secrets] scanned ${secretsResult.filesScanned} files`);
+    if (secretsResult.filesSkipped > 0) {
+      await appendLog(
+        scanId,
+        "INFO",
+        `[secrets] skipped ${secretsResult.filesSkipped} files because they exceeded the size limit or could not be read`
+      );
+    }
+    // Count only — never a raw value or even a safe name in this top-level log line.
+    await appendLog(scanId, "INFO", `[secrets] found ${secretsResult.secretsFound} candidate hardcoded secrets`);
+    await appendLog(scanId, "INFO", `[secrets] upserted ${secretsResult.assetsUpserted} crypto assets`);
+
     // ── risk scoring pass (Phase 4, Step 5) ────────────────────────────────
-    // Union + dedupe every asset touched by the three detectors above, then
-    // score exactly once — never the repository's full historical inventory.
+    // Union + dedupe every asset touched by every detector above, then score
+    // exactly once — never the repository's full historical inventory, and
+    // never any asset twice even though five detectors now contribute IDs.
     const scoredAssetIds = [
-      ...new Set([...jsResult.assetIds, ...manifestResult.assetIds, ...certKeyResult.assetIds]),
+      ...new Set([
+        ...jsResult.assetIds,
+        ...manifestResult.assetIds,
+        ...certKeyResult.assetIds,
+        ...configProtocolResult.assetIds,
+        ...secretsResult.assetIds,
+      ]),
     ];
 
     await appendLog(scanId, "INFO", "[scanner] starting risk scoring pass");
 
-    await runScoringPass({
+    const scoringResult = await runScoringPass({
       repositoryId,
       scanId,
       assetIds: scoredAssetIds,
@@ -133,12 +195,14 @@ export async function runScanner(
 
     await appendLog(scanId, "INFO", "[scanner] Scan complete");
 
-    // Finding generation is not implemented yet — Steps 2-4 are CryptoAsset
-    // discovery only, and Step 5 is risk scoring only. Finding/CBOM
-    // generation are later phases.
     return {
-      assetsWritten: jsResult.assetsUpserted + manifestResult.assetsUpserted + certKeyResult.assetsUpserted,
-      findingsWritten: 0,
+      assetsWritten:
+        jsResult.assetsUpserted +
+        manifestResult.assetsUpserted +
+        certKeyResult.assetsUpserted +
+        configProtocolResult.assetsUpserted +
+        secretsResult.assetsUpserted,
+      findingsWritten: scoringResult.findingsCreated + scoringResult.findingsUpdated,
     };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});

@@ -95,7 +95,7 @@ export interface Finding {
   detail: string;
   affectedComponent: string;
   filePath: string;
-  status: "Open" | "Mitigated" | "Accepted";
+  status: "Open" | "Mitigated" | "Accepted" | "Resolved";
   firstSeenAt: string;
   lastSeenAt: string;
 }

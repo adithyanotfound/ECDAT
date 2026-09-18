@@ -96,7 +96,7 @@ const FLAT_TABLE: Record<string, DeprecatedAlgorithmEntry> = {
 
 // ─── RSA / DSA: status depends on modulus length ───────────────────────────
 
-const RSA_DSA_ALGORITHMS = new Set(["rsa", "rsa-pss", "rsa-oaep"]);
+export const RSA_DSA_ALGORITHMS = new Set(["rsa", "rsa-pss", "rsa-oaep"]);
 export const RSA_DSA_DISALLOWED_BELOW_BITS = 2048;
 export const RSA_DSA_RECOMMENDED_AT_OR_ABOVE_BITS = 3072;
 

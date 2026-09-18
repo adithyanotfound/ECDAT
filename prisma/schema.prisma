@@ -46,6 +46,7 @@ enum FindingStatus {
   OPEN
   MITIGATED
   ACCEPTED
+  RESOLVED
 }
 
 enum JobStatus {

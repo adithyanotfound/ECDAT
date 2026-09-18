@@ -35,21 +35,6 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     distinct: ["repositoryId"],
   });
 
-  // Vulnerabilities by source (map kind → source label)
-  const kindToSource: Record<string, string> = {
-    ALGORITHM: "Code Repo",
-    CERTIFICATE: "Code Repo",
-    KEY: "Code Repo",
-    PROTOCOL: "Network",
-    LIBRARY: "Code Repo",
-    SECRET: "Code Repo",
-  };
-  const findingsBySeverity = await prisma.finding.groupBy({
-    by: ["severity"],
-    where: { status: "OPEN" },
-    _count: { severity: true },
-  });
-
   // Build posture breakdown from risk assessments
   const postureRaw = await prisma.riskAssessment.groupBy({
     by: ["riskCategory"],
@@ -67,16 +52,41 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     compliant: posturePct("SAFE"),
   };
 
-  // By source type — simplified 7-bar chart
-  const vulnBySource: VulnBySource[] = [
-    "Hosts", "Network", "KMS", "Database", "Code Repo", "File Systems", "Database"
-  ].map((source) => ({
-    source,
-    critical: Math.floor(Math.random() * 10) + 5,
-    high: Math.floor(Math.random() * 8) + 2,
-    moderate: Math.floor(Math.random() * 6) + 1,
-    low: Math.floor(Math.random() * 8) + 3,
-  }));
+  // By source type — real severity-segmented breakdown of OPEN findings,
+  // grouped by the CryptoKind of each finding's triggering asset (via the
+  // FindingAsset join). Only kinds an OPEN finding actually cites appear —
+  // no fixed 7-row list, since PROTOCOL/SECRET detection isn't implemented
+  // yet and would otherwise always render as a fake zero row.
+  const kindToSourceLabel: Record<string, string> = {
+    ALGORITHM: "Source Code",
+    LIBRARY: "Dependencies",
+    CERTIFICATE: "Certificates",
+    KEY: "Keys",
+    PROTOCOL: "Protocols",
+    SECRET: "Secrets",
+  };
+  const openFindingsWithAssetKind = await prisma.finding.findMany({
+    where: { status: "OPEN" },
+    select: {
+      severity: true,
+      assets: { take: 1, select: { cryptoAsset: { select: { kind: true } } } },
+    },
+  });
+  const bySource = new Map<string, VulnBySource>();
+  for (const f of openFindingsWithAssetKind) {
+    const kind = f.assets[0]?.cryptoAsset.kind;
+    if (!kind) continue;
+    const label = kindToSourceLabel[kind] ?? kind;
+    const row = bySource.get(label) ?? { source: label, critical: 0, high: 0, moderate: 0, low: 0 };
+    if (f.severity === "CRITICAL") row.critical++;
+    else if (f.severity === "HIGH") row.high++;
+    else if (f.severity === "MODERATE") row.moderate++;
+    else if (f.severity === "LOW") row.low++;
+    bySource.set(label, row);
+  }
+  const vulnBySource: VulnBySource[] = [...bySource.values()].sort(
+    (a, b) => b.critical + b.high + b.moderate + b.low - (a.critical + a.high + a.moderate + a.low)
+  );
 
   // Asset type distribution
   const kindLabel: Record<string, string> = {

@@ -17,6 +17,8 @@ import { computeCrsfScore, deriveRiskCategory } from "./crsf";
 import { computePqcSafetyScore } from "./pqc";
 import { computeCisConformance } from "./cis";
 import { computeMoscaVerdict } from "./mosca";
+import { deriveFindingsForAsset, type FindingCandidate } from "@/server/findings/derive";
+import { persistFindings } from "@/server/findings/persist";
 import type { RepositoryCriticality, RiskCategory, ScoringInput } from "./types";
 
 export type ScoringLogLevel = "INFO" | "WARN" | "ERROR";
@@ -33,6 +35,9 @@ export interface RunScoringPassOptions {
 export interface ScoringPassResult {
   assetsScored: number;
   distribution: Record<RiskCategory, number>;
+  findingsCreated: number;
+  findingsUpdated: number;
+  findingsResolved: number;
 }
 
 function emptyDistribution(): Record<RiskCategory, number> {
@@ -47,7 +52,7 @@ export async function runScoringPass(options: RunScoringPassOptions): Promise<Sc
   const uniqueAssetIds = [...new Set(assetIds)];
   if (uniqueAssetIds.length === 0) {
     await onLog("INFO", "[scoring] no assets to score");
-    return { assetsScored: 0, distribution };
+    return { assetsScored: 0, distribution, findingsCreated: 0, findingsUpdated: 0, findingsResolved: 0 };
   }
 
   // Fetched once and reused for every asset — CRITICAL/LOW etc. and data
@@ -62,13 +67,18 @@ export async function runScoringPass(options: RunScoringPassOptions): Promise<Sc
     select: {
       id: true,
       kind: true,
+      name: true,
       algorithm: true,
       keyLengthBits: true,
       quantumSafe: true,
       curve: true,
       usageCount: true,
+      filePath: true,
+      lineNumber: true,
     },
   });
+
+  const findingCandidates: FindingCandidate[] = [];
 
   let assetsScored = 0;
   for (const asset of assets) {
@@ -102,6 +112,26 @@ export async function runScoringPass(options: RunScoringPassOptions): Promise<Sc
 
     distribution[riskCategory]++;
     assetsScored++;
+
+    // Finding derivation (Phase 5, Step 7) — pure logic, runs off the same
+    // asset this iteration just scored. Persistence happens once for the
+    // whole batch, after this loop.
+    findingCandidates.push(
+      ...deriveFindingsForAsset(
+        {
+          id: asset.id,
+          kind: asset.kind,
+          name: asset.name,
+          algorithm: asset.algorithm,
+          keyLengthBits: asset.keyLengthBits,
+          curve: asset.curve,
+          quantumSafe: asset.quantumSafe,
+          filePath: asset.filePath,
+          lineNumber: asset.lineNumber,
+        },
+        repository.criticality as RepositoryCriticality
+      )
+    );
   }
 
   await onLog("INFO", `[scoring] scored ${assetsScored} assets`);
@@ -110,5 +140,8 @@ export async function runScoringPass(options: RunScoringPassOptions): Promise<Sc
     `[scoring] distribution: ${distribution.CRITICAL} critical, ${distribution.HIGH} high, ${distribution.MODERATE} moderate, ${distribution.LOW} low, ${distribution.SAFE} safe`
   );
 
-  return { assetsScored, distribution };
+  const { created, updated, resolved } = await persistFindings(repositoryId, options.scanId, findingCandidates);
+  await onLog("INFO", `[findings] ${created} findings created, ${updated} updated, ${resolved} resolved`);
+
+  return { assetsScored, distribution, findingsCreated: created, findingsUpdated: updated, findingsResolved: resolved };
 }
