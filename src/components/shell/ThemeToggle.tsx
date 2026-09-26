@@ -26,7 +26,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all duration-150"
+      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
       style={{
         backgroundColor: "var(--color-surface)",
         border: "1px solid var(--color-border)",

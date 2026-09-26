@@ -10,6 +10,7 @@ import type {
   Severity,
   CryptoKind,
 } from "@/fixtures/types";
+import { requireSession } from "@/server/auth/session";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,9 +63,10 @@ export async function getInventoryPage({
   sort = "lastDiscovered",
   dir = "desc",
 }: InventoryPageParams = {}): Promise<InventoryPage> {
+  const session = await requireSession();
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const where = search
+  const searchWhere = search
     ? {
         OR: [
           { fullName: { contains: search, mode: "insensitive" as const } },
@@ -72,6 +74,8 @@ export async function getInventoryPage({
         ],
       }
     : {};
+
+  const where = { ...searchWhere, owner: session.login };
 
   const [repos, total, totalAssets, classifiedAssets, newAssets] = await Promise.all([
     prisma.repository.findMany({
@@ -93,9 +97,9 @@ export async function getInventoryPage({
     }),
     prisma.repository.count({ where }),
     prisma.repository.count(),
-    prisma.repository.count({ where: { scanEnabled: true } }),
+    prisma.repository.count({ where: { scanEnabled: true, owner: session.login } }),
     prisma.repository.count({
-      where: { createdAt: { gte: sevenDaysAgo } },
+      where: { createdAt: { gte: sevenDaysAgo }, owner: session.login },
     }),
   ]);
 
@@ -147,7 +151,9 @@ export async function getCryptoAssetsPage({
   sort = "crsfScore",
   dir = "desc",
 }: CryptoAssetsPageParams = {}): Promise<CryptoAssetsPage> {
+  const session = await requireSession();
   const where = {
+    repository: { owner: session.login },
     ...(repositoryId ? { repositoryId } : {}),
     ...(kind ? { kind: kind as "ALGORITHM" } : {}),
     ...(search
@@ -241,7 +247,9 @@ export async function getFindingsPage({
   pageSize = 10,
   search,
 }: FindingsPageParams = {}): Promise<FindingsPage> {
+  const session = await requireSession();
   const where = {
+    repository: { owner: session.login },
     ...(repositoryId ? { repositoryId } : {}),
     ...(severity ? { severity: severity as "CRITICAL" } : {}),
     ...(status ? { status: status as "OPEN" } : {}),
@@ -265,9 +273,9 @@ export async function getFindingsPage({
       take: pageSize,
     }),
     prisma.finding.count({ where }),
-    prisma.finding.count({ where: { status: "OPEN" } }),
-    prisma.finding.count({ where: { severity: "CRITICAL" } }),
-    prisma.finding.count({ where: { severity: "HIGH" } }),
+    prisma.finding.count({ where: { status: "OPEN", repository: { owner: session.login } } }),
+    prisma.finding.count({ where: { severity: "CRITICAL", repository: { owner: session.login } } }),
+    prisma.finding.count({ where: { severity: "HIGH", repository: { owner: session.login } } }),
   ]);
 
   const items: Finding[] = rawItems.map((f) => ({

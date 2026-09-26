@@ -33,12 +33,14 @@ const levelPrefix: Record<string, string> = {
 export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<"streaming" | "done" | "failed" | "idle">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"logs" | "changes">("logs");
   const scrollRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     setActiveTab("logs");
+    setErrorMessage(null);
   }, [scanId]);
 
   useEffect(() => {
@@ -66,8 +68,11 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
     es.addEventListener("log", (e) => handleLog((e as MessageEvent).data));
 
     es.addEventListener("done", (e) => {
-      const data = JSON.parse((e as MessageEvent).data) as { status: string };
+      const data = JSON.parse((e as MessageEvent).data) as { status: string; errorMessage?: string };
       setStatus(data.status === "FAILED" ? "failed" : "done");
+      if (data.errorMessage) {
+        setErrorMessage(data.errorMessage);
+      }
       es.close();
     });
 
@@ -102,6 +107,8 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
         style={{
           backgroundColor: "var(--color-surface)",
           border: "1px solid var(--color-border)",
+          minHeight: "60vh",
+          maxHeight: "90vh"
         }}
       >
         {/* Header */}
@@ -233,7 +240,12 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
                 borderTop: "1px solid var(--color-border)",
               }}
             >
-              ✕ Scan failed
+              <div className="font-semibold mb-1">✕ Scan failed</div>
+              {errorMessage && (
+                <div className="opacity-90 mt-1 whitespace-pre-wrap font-sans text-sm">
+                  {errorMessage}
+                </div>
+              )}
             </div>
           )}
         </div>

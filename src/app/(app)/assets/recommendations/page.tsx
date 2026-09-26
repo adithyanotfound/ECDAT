@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Search, ChevronLeft, ChevronRight, Lightbulb } from "lucide-react";
+import { StatCard } from "@/components/ui/StatCard";
 
 interface Recommendation {
   id: string;
@@ -103,23 +104,13 @@ export default function RecommendationsPage() {
       {/* KPI tiles */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         {kpiCards.map((card) => (
-          <div
+          <StatCard
             key={card.label}
-            className="rounded-xl p-4"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderLeft: `3px solid ${card.color}`,
-            }}
-          >
-            <p className="text-xs font-medium uppercase tracking-wide mb-2" style={{ color: "var(--color-ink-muted)" }}>
-              {card.label}
-            </p>
-            <p className="text-3xl font-bold tabular-nums" style={{ color: "var(--color-ink)" }}>
-              {loading ? "—" : card.value}
-            </p>
-            <p className="text-xs mt-1" style={{ color: "var(--color-ink-faint)" }}>{card.sub}</p>
-          </div>
+            title={card.label}
+            value={loading ? "—" : card.value}
+            subtitle={card.sub}
+            accentColor={card.color}
+          />
         ))}
       </div>
 

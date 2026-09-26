@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     "unmanful-unbalanced-kacey.ngrok-free.dev",
     "*.ngrok-free.dev",
     "*.ngrok.app",
+    "*.ngrok-free.app",
     "*.trycloudflare.com",
   ],
 };

@@ -60,11 +60,11 @@ export async function GET(
         // Check if scan is done
         const scan = await prisma.scan.findUnique({
           where: { id: scanId },
-          select: { status: true },
+          select: { status: true, errorMessage: true },
         }).catch(() => null);
 
         if (scan?.status === "COMPLETED" || scan?.status === "FAILED") {
-          send("done", { status: scan.status });
+          send("done", { status: scan.status, errorMessage: scan.errorMessage });
           closed = true;
           controller.close();
           return;

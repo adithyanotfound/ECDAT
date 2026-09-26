@@ -1,16 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Menu } from "lucide-react";
-import { ThemeToggle } from "./ThemeToggle";
+import { Bell, LogOut } from "lucide-react";
 import { Breadcrumbs } from "./Breadcrumbs";
+import { useRouter } from "next/navigation";
 
-interface TopbarProps {
-  onToggleSidebar: () => void;
-}
-
-export function Topbar({ onToggleSidebar }: TopbarProps) {
+export function Topbar() {
+  const router = useRouter();
   const [user, setUser] = useState<{ login: string; name: string | null; avatarUrl?: string } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -19,8 +17,20 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
       .catch(() => setUser(null));
   }, []);
 
-  const displayName = user ? (user.name || user.login) : "Guest";
+  const displayName = user ? (user.name || user.login) : "User";
   const initial = displayName.charAt(0).toUpperCase();
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+    router.push("/login");
+    router.refresh();
+  }
+
   return (
     <header
       className="flex items-center gap-4 px-5"
@@ -31,18 +41,6 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
         flexShrink: 0,
       }}
     >
-      {/* Hamburger */}
-      <button
-        onClick={onToggleSidebar}
-        className="p-1.5 rounded-md transition-colors"
-        style={{ color: "var(--color-ink-muted)" }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-ink)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-ink-muted)")}
-        aria-label="Toggle sidebar"
-      >
-        <Menu size={18} />
-      </button>
-
       {/* Breadcrumbs */}
       <div className="flex-1">
         <Breadcrumbs />
@@ -50,25 +48,14 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
 
       {/* Right controls */}
       <div className="flex items-center gap-3">
-        {/* Welcome text */}
-        <span
-          className="text-sm hidden md:block"
-          style={{ color: "var(--color-ink-muted)" }}
-        >
+        {/* Welcome */}
+        <span className="text-sm hidden md:block" style={{ color: "var(--color-ink-muted)" }}>
           {user ? (
             <>
               Welcome{" "}
               <span style={{ color: "var(--color-ink)", fontWeight: 500 }}>{displayName}</span>
             </>
-          ) : (
-            <a
-              href="/api/github/login"
-              className="text-sm font-medium transition-colors"
-              style={{ color: "var(--color-accent)" }}
-            >
-              Sign In
-            </a>
-          )}
+          ) : null}
         </span>
 
         {/* Avatar */}
@@ -95,10 +82,8 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
 
         {/* Bell */}
         <button
-          className="p-1.5 rounded-md relative transition-colors"
+          className="p-1.5 rounded-md relative"
           style={{ color: "var(--color-ink-muted)" }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-ink)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-ink-muted)")}
           aria-label="Notifications"
         >
           <Bell size={16} />
@@ -108,8 +93,6 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
           />
         </button>
 
-        {/* Theme toggle */}
-        <ThemeToggle />
       </div>
     </header>
   );

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
+import { requireSession } from "@/server/auth/session";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -9,7 +10,10 @@ export async function GET(req: NextRequest) {
   const effort = searchParams.get("effort") ?? undefined;
   const sort = searchParams.get("sort") ?? undefined;
 
+  const session = await requireSession();
+  
   const where = {
+    repository: { owner: session.login },
     ...(effort ? { effort: effort.toUpperCase() } : {}),
     ...(search
       ? {

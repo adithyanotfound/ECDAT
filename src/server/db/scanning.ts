@@ -3,6 +3,7 @@
  */
 import { prisma } from "./client";
 import type { Repository, Scan, ScanProfile, ScanStatus, Trigger } from "@/fixtures/types";
+import { requireSession } from "@/server/auth/session";
 
 // ─── Repositories ─────────────────────────────────────────────────────────────
 
@@ -27,7 +28,9 @@ function mapCriticality(c: string): Repository["criticality"] {
 }
 
 export async function getRepositories(): Promise<Repository[]> {
+  const session = await requireSession();
   const repos = await prisma.repository.findMany({
+    where: { owner: session.login },
     include: {
       scans: {
         orderBy: { startedAt: "desc" },
@@ -78,7 +81,9 @@ export async function getScansPage({
   status,
   repositoryId,
 }: ScansPageParams = {}): Promise<ScansPage> {
+  const session = await requireSession();
   const where = {
+    repository: { owner: session.login },
     ...(status ? { status: status as "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" } : {}),
     ...(repositoryId ? { repositoryId } : {}),
   };
