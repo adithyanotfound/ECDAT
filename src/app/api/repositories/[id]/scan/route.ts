@@ -48,7 +48,7 @@ export async function POST(
       scanId: scan.id,
       repositoryId,
       installationId,
-      owner: repo.owner,
+      owner: repo.sourceType === "GITHUB" ? repo.fullName.split("/")[0] : repo.owner,
       repo: repo.name,
       ref: `refs/heads/${repo.defaultBranch}`,
       commitSha: isAws ? "aws-manual" : "manual",

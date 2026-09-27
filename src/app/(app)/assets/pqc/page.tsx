@@ -266,7 +266,9 @@ export default function PqcPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/assets?kind=ALGORITHM&pageSize=500")
+    // Fetch ALL kinds: ALGORITHM, KEY, CERTIFICATE, PROTOCOL, SECRET
+    // so AWS KMS keys, ACM certs, and code-level findings all appear
+    fetch("/api/assets?pageSize=500")
       .then((r) => r.json())
       .then((data) => setAlgorithms(data.items ?? []))
       .finally(() => setLoading(false));
@@ -280,7 +282,7 @@ export default function PqcPage() {
             PQC — Cryptographic Inventory
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--color-ink-muted)" }}>
-            Algorithms · Certificates · Keys · Protocols
+            Algorithms · Certificates · Keys · Protocols · AWS Cloud Assets
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -292,7 +294,7 @@ export default function PqcPage() {
             <Shield size={14} /> CBOM Report
           </a>
           <a
-            href="/api/assets/export?kind=ALGORITHM"
+            href="/api/assets/export"
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
             style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
           >

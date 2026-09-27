@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { Repository } from "@/fixtures/types";
 import { StatusPill } from "@/components/ui/Pill";
+import { AddRepoModal } from "@/components/ui/AddRepoModal";
 import { Search, Plus, ExternalLink, RefreshCw, Play, Link2, GitBranch } from "lucide-react";
 import { formatRelativeTime, truncateHash } from "@/lib/format";
 
@@ -38,6 +39,7 @@ export default function RepositoriesPage() {
   const [repos, setRepos] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState<Record<string, boolean>>({});
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const load = async () => {
     try {
@@ -101,15 +103,13 @@ export default function RepositoriesPage() {
           >
             <RefreshCw size={13} /> Refresh
           </button>
-          <a
-            href={`https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff", textDecoration: "none" }}
+            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
           >
             <Plus size={14} /> Add Repository
-          </a>
+          </button>
           <div
             className="flex items-center gap-2 rounded-lg px-3 py-2"
             style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", width: "220px" }}
@@ -197,9 +197,13 @@ export default function RepositoriesPage() {
                       <div className="flex items-center gap-2">
                         <GitBranch size={13} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
                         <div>
-                          <p className="font-medium text-sm" style={{ color: "var(--color-ink)" }}>
+                          <a 
+                            href={`/scanning/repositories/${repo.id}`} 
+                            className="font-medium text-sm hover:underline block" 
+                            style={{ color: "var(--color-accent)" }}
+                          >
                             {repo.name}
-                          </p>
+                          </a>
                           <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
                             {repo.fullName}
                           </p>
@@ -296,6 +300,12 @@ export default function RepositoriesPage() {
       <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
         Showing {filtered.length} of {repos.length} repositories · Auto-refreshes every 5s
       </p>
+
+      <AddRepoModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSuccess={load} 
+      />
     </div>
   );
 }

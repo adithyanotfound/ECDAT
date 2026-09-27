@@ -86,18 +86,25 @@ async function handlePush(payload: {
   installation?: { id: number };
   repository: { id: number; full_name: string; owner: { login: string }; name: string };
 }) {
-  const installationId = payload.installation?.id;
-  if (!installationId) return;
+  const installationId = payload.installation?.id ?? 0;
 
   // Only scan default branch pushes (avoid PR branches for initial implementation)
   const { ref, after: commitSha, repository } = payload;
   if (!ref.startsWith("refs/heads/")) return;
 
   // Find the repository in our DB
-  const repo = await prisma.repository.findUnique({
+  let repo = await prisma.repository.findFirst({
     where: { githubRepoId: repository.id },
-    select: { id: true, scanEnabled: true, owner: true, name: true },
+    select: { id: true, scanEnabled: true, owner: true, name: true, fullName: true },
   });
+  
+  if (!repo) {
+    // Fallback for manually added repositories
+    repo = await prisma.repository.findUnique({
+      where: { fullName: repository.full_name },
+      select: { id: true, scanEnabled: true, owner: true, name: true, fullName: true },
+    });
+  }
   if (!repo || !repo.scanEnabled) return;
 
   // Create scan row + enqueue
@@ -115,7 +122,7 @@ async function handlePush(payload: {
     scanId: scan.id,
     repositoryId: repo.id,
     installationId,
-    owner: repo.owner,
+    owner: repo.owner === "admin" ? repo.fullName.split("/")[0] : repo.owner,
     repo: repo.name,
     ref,
     commitSha: commitSha.slice(0, 7),

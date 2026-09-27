@@ -21,10 +21,17 @@ import { requireSession } from "@/server/auth/session";
 import { repositories as fixtureRepos } from "@/fixtures/repositories";
 
 const AwsRepoSchema = z.object({
+  sourceType: z.literal("AWS").optional(),
   accessKeyId: z.string().min(16).max(128),
   secretAccessKey: z.string().min(20).max(512),
   region: z.string().min(1).max(64),
   name: z.string().min(1).max(512),
+  defaultBranch: z.string().max(128).optional().default("main"),
+});
+
+const GithubRepoSchema = z.object({
+  sourceType: z.literal("GITHUB"),
+  fullName: z.string().min(1).max(512), // e.g. "HarshitJain2103/Mock-repo"
   defaultBranch: z.string().max(128).optional().default("main"),
 });
 
@@ -53,6 +60,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  const bodyObj = body as Record<string, any>;
+  
+  if (bodyObj.sourceType === "GITHUB") {
+    const parsed = GithubRepoSchema.safeParse(bodyObj);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Validation failed", issues: parsed.error.issues }, { status: 422 });
+    }
+    const { fullName, defaultBranch } = parsed.data;
+    
+    // Check for duplicate
+    const existing = await prisma.repository.findUnique({ where: { fullName } });
+    if (existing) {
+      return NextResponse.json({ error: `Repository '${fullName}' already exists`, repositoryId: existing.id }, { status: 409 });
+    }
+
+    try {
+      const repo = await prisma.repository.create({
+        data: {
+          sourceType: "GITHUB",
+          fullName,
+          owner: session.login,
+          name: fullName.split("/")[1] || fullName,
+          defaultBranch,
+          scanEnabled: true,
+        },
+      });
+      return NextResponse.json(repo, { status: 201 });
+    } catch (err) {
+      console.error("[github-repo] create error:", err);
+      return NextResponse.json({ error: "Failed to create GitHub repository" }, { status: 500 });
+    }
+  }
+
+  // AWS Flow
   const parsed = AwsRepoSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

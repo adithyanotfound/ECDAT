@@ -14,6 +14,7 @@ import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { Readable } from "stream";
 import { getInstallationOctokit } from "./auth";
+import { Octokit } from "octokit";
 
 export interface Checkout {
   dir: string;
@@ -23,20 +24,31 @@ export interface Checkout {
 const MAX_TARBALL_BYTES = 200 * 1024 * 1024; // 200MB ceiling per scan
 
 export async function checkoutTarball(
-  installationId: number,
+  installationId: number | null | undefined,
   owner: string,
   repo: string,
   ref: string
 ): Promise<Checkout> {
-  const octokit = await getInstallationOctokit(installationId);
+  let buffer: Buffer;
+  
+  if (installationId) {
+    const octokit = await getInstallationOctokit(installationId);
+    const res = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
+      owner,
+      repo,
+      ref,
+    });
+    buffer = Buffer.from(res.data as ArrayBuffer);
+  } else {
+    // For manual/public repos without an app installation, download anonymously
+    const url = `https://github.com/${owner}/${repo}/archive/refs/heads/${ref}.tar.gz`;
+    const res = await fetch(url, { redirect: "follow" });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch tarball from ${url}: ${res.status} ${res.statusText}`);
+    }
+    buffer = Buffer.from(await res.arrayBuffer());
+  }
 
-  const res = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
-    owner,
-    repo,
-    ref,
-  });
-
-  const buffer = Buffer.from(res.data as ArrayBuffer);
   if (buffer.byteLength > MAX_TARBALL_BYTES) {
     throw new Error(`Tarball for ${owner}/${repo}@${ref} exceeds ${MAX_TARBALL_BYTES} bytes`);
   }
