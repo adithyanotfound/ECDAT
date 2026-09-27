@@ -178,7 +178,7 @@ export default function CbomReportPage() {
           headStyles: { fillColor: [47, 91, 255] }
         });
 
-        doc.save(`${report.repositoryFullName.replace(/\\//g, "-")}-cbom.pdf`);
+        doc.save(`${report.repositoryFullName.replace(/\//g, '-')}-cbom.pdf`);
       });
     });
   };

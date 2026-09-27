@@ -13,6 +13,10 @@
  */
 import { prisma } from "@/server/db/client";
 import { checkoutTarball } from "@/server/github/tarball";
+import { checkoutAws } from "@/server/aws/adapter";
+import { scanKms } from "@/server/aws/kms";
+import { scanAcm } from "@/server/aws/acm";
+import { resolveSecretKey } from "@/server/aws/credentials";
 import { postScanCheckRun } from "@/server/github/checks";
 import { runEngine } from "@/server/engine/scan";
 import type { NormalizedHit, ScanProfileConfig } from "@/server/engine/types";
@@ -43,9 +47,57 @@ export async function runScanner(
       }
     : {};
 
-  await appendLog(scanId, "INFO", `Fetching ${payload.owner}/${payload.repo}@${payload.ref} tarball`);
-  const gitRef = payload.ref.replace(/^refs\/heads\//, "");
-  const checkout = await checkoutTarball(payload.installationId, payload.owner, payload.repo, gitRef || payload.commitSha);
+  const isAws = repo.sourceType === "AWS";
+
+  // ── Source checkout ──────────────────────────────────────────────────────────
+  let checkout;
+  if (isAws) {
+    if (!repo.awsAccessKey || !repo.awsSecretKey || !repo.awsRegion) {
+      throw new Error("AWS repository is missing credentials (awsAccessKey, awsSecretKey, awsRegion)");
+    }
+    const awsCreds = {
+      accessKeyId: repo.awsAccessKey,
+      secretAccessKey: resolveSecretKey(repo.awsSecretKey),
+      region: repo.awsRegion,
+    };
+    await appendLog(scanId, "INFO", `[AWS] Fetching ${repo.name} from AWS (${repo.awsRegion})`);
+    checkout = await checkoutAws(
+      awsCreds,
+      repo.name,
+      payload.ref.replace(/^refs\/heads\//, "") || repo.defaultBranch,
+      (level, message) => void appendLog(scanId, level, message)
+    );
+  } else {
+    await appendLog(scanId, "INFO", `Fetching ${payload.owner}/${payload.repo}@${payload.ref} tarball`);
+    const gitRef = payload.ref.replace(/^refs\/heads\//, "");
+    checkout = await checkoutTarball(payload.installationId, payload.owner, payload.repo, gitRef || payload.commitSha);
+  }
+
+  // ── AWS cloud-native asset scans (KMS + ACM) ────────────────────────────────
+  // These run in parallel with the code scan hits and get injected into the
+  // same result set — their NormalizedHit objects pass through the identical
+  // CRSF scoring and upsert pipeline as code-level detections.
+  let awsHits: NormalizedHit[] = [];
+  if (isAws && repo.awsAccessKey && repo.awsSecretKey && repo.awsRegion) {
+    const awsCreds = {
+      accessKeyId: repo.awsAccessKey,
+      secretAccessKey: resolveSecretKey(repo.awsSecretKey),
+      region: repo.awsRegion,
+    };
+    const logFn = (level: "INFO" | "WARN" | "ERROR", message: string) => {
+      logScan(scanId, level, message, { repositoryId });
+      void appendLog(scanId, level, message);
+    };
+    const [kmsHits, acmHits] = await Promise.allSettled([
+      scanKms(repositoryId, awsCreds, logFn),
+      scanAcm(repositoryId, awsCreds, logFn),
+    ]);
+    if (kmsHits.status === "fulfilled") awsHits = awsHits.concat(kmsHits.value);
+    else await appendLog(scanId, "WARN", `KMS scan failed: ${kmsHits.reason instanceof Error ? kmsHits.reason.message : String(kmsHits.reason)}`);
+    if (acmHits.status === "fulfilled") awsHits = awsHits.concat(acmHits.value);
+    else await appendLog(scanId, "WARN", `ACM scan failed: ${acmHits.reason instanceof Error ? acmHits.reason.message : String(acmHits.reason)}`);
+    await appendLog(scanId, "INFO", `[AWS] Cloud-native hits: ${awsHits.length} (KMS + ACM)`);
+  }
 
   try {
     await appendLog(scanId, "INFO", `Checked out to ${checkout.dir}`);
@@ -55,13 +107,15 @@ export async function runScanner(
       void appendLog(scanId, level, message);
     });
 
-    await appendLog(scanId, "INFO", `Upserting ${result.hits.length} crypto assets`);
+    // Merge AWS cloud-native hits with code-scan hits
+    const allHits: NormalizedHit[] = [...result.hits, ...awsHits];
+    await appendLog(scanId, "INFO", `Upserting ${allHits.length} crypto assets (${result.hits.length} code + ${awsHits.length} AWS cloud)`);
 
     let assetsWritten = 0;
     let findingsWritten = 0;
     let quantumVulnerableCount = 0;
 
-    for (const hit of result.hits) {
+    for (const hit of allHits) {
       const existing = await prisma.cryptoAsset.findUnique({
         where: { repositoryId_fingerprint: { repositoryId, fingerprint: hit.fingerprint } },
         select: { id: true, usageCount: true },
@@ -76,7 +130,7 @@ export async function runScanner(
       const mosca = computeMosca({
         dataLifetimeYears: repo.dataLifetimeYears,
         quantumVulnerableCount: hit.quantumSafe === false ? 1 : 0,
-        totalAssetCount: result.hits.length,
+        totalAssetCount: allHits.length,
       });
 
       const assetData = {
@@ -211,7 +265,7 @@ export async function runScanner(
     // ── Recommendations — regenerate fresh from this scan's quantum-vulnerable canon names ──
     await appendLog(scanId, "INFO", "Regenerating PQC recommendations");
     await prisma.recommendation.deleteMany({ where: { repositoryId } });
-    const recoRows = dedupeRecommendations(result.hits);
+    const recoRows = dedupeRecommendations(allHits);
     if (recoRows.length) {
       await prisma.recommendation.createMany({
         data: recoRows.map((r) => ({ repositoryId, ...r })),
