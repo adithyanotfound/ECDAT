@@ -10,8 +10,7 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { InfoHint } from "@/components/ui/InfoHint";
-import { ScorePill } from "@/components/ui/Pill";
+import { RepositoryRiskChart } from "./RepositoryRiskChart";
 import { TONE, type Tone } from "@/lib/tones";
 import type { AssetByType, KeyDistribution, PostureBreakdown, RepositoryRisk, VulnBySource } from "@/fixtures/types";
 
@@ -37,31 +36,17 @@ function Legend({ items }: { items: { label: string; tone: Tone }[] }) {
 
 // ─── Which repositories to fix first ──────────────────────────────────────────
 
-const RISK_BANDS: { key: "critical" | "high" | "moderate" | "low" | "safe"; label: string; tone: Tone }[] = [
-  { key: "critical", label: "Critical", tone: "critical" },
-  { key: "high", label: "High", tone: "high" },
-  { key: "moderate", label: "Moderate", tone: "moderate" },
-  { key: "low", label: "Low", tone: "low" },
-  { key: "safe", label: "Safe", tone: "safe" },
-];
-
-const totalOf = (r: RepositoryRisk) => r.critical + r.high + r.moderate + r.low + r.safe;
-
 /**
- * One stacked bar per repository: its crypto assets by risk level, longest
- * bar = most assets, rows ordered by urgency (critical, then high, …). The
- * right-hand column is that repository's own quantum readiness. Each row
- * opens the repository, the next layer down.
+ * The priority map (see RepositoryRiskChart): readiness across, urgent assets
+ * up, so the repositories to start with sit in the top-left corner.
  */
-export function RepositoryRiskCard({ data, limit = 8 }: { data: RepositoryRisk[]; limit?: number }) {
-  const rows = data.slice(0, limit);
-  const max = Math.max(1, ...rows.map(totalOf));
+export function RepositoryRiskCard({ data }: { data: RepositoryRisk[] }) {
   return (
     <Card>
       <CardHeader
         title="Which repositories to fix first"
-        subtitle="Crypto assets in each repository by risk level, most urgent first"
-        term="crsf"
+        subtitle="Each repository by its quantum readiness and how many assets need action first. Click one to open it."
+        term="quantumReadiness"
         action={
           <Link
             href="/scanning/repositories"
@@ -72,70 +57,7 @@ export function RepositoryRiskCard({ data, limit = 8 }: { data: RepositoryRisk[]
         }
       />
       <div className="p-5">
-        {rows.length === 0 ? (
-          <p className="py-6 text-center text-[13.5px] text-muted">No scanned repositories yet.</p>
-        ) : (
-          <>
-            <Legend items={RISK_BANDS} />
-            <div className="mt-4 hidden grid-cols-[minmax(0,240px)_1fr_40px_64px] items-center gap-4 border-b border-line pb-2 text-[12px] font-medium text-muted sm:grid">
-              <span>Repository</span>
-              <span>Assets by risk level</span>
-              <span className="text-right">Total</span>
-              <span className="flex items-center justify-end gap-1">
-                Ready <InfoHint label="Readiness" term="quantumReadiness" />
-              </span>
-            </div>
-            <ul className="mt-1">
-              {rows.map((r) => {
-                const total = totalOf(r);
-                const summary = RISK_BANDS.filter((b) => r[b.key] > 0)
-                  .map((b) => `${r[b.key]} ${b.label.toLowerCase()}`)
-                  .join(", ");
-                return (
-                  <li key={r.id}>
-                    <Link
-                      href={`/scanning/repositories/${r.id}`}
-                      aria-label={`${r.fullName}: ${summary}. Readiness ${r.readiness ?? "not scored"}.`}
-                      className="-mx-2 grid grid-cols-[minmax(0,1fr)_40px_64px] items-center gap-x-4 gap-y-1.5 rounded-lg px-2 py-2.5 transition-colors hover:bg-surface-2/60 sm:grid-cols-[minmax(0,240px)_1fr_40px_64px]"
-                    >
-                      <span
-                        className="col-span-3 truncate text-[13px] font-medium text-ink-2 sm:col-span-1"
-                        title={r.fullName}
-                      >
-                        {r.fullName}
-                      </span>
-                      <span className="h-3 overflow-hidden rounded-full bg-sunken/60">
-                        <span className="flex h-full gap-[2px]" style={{ width: `${(total / max) * 100}%` }}>
-                          {RISK_BANDS.filter((b) => r[b.key] > 0).map((b) => (
-                            <span
-                              key={b.key}
-                              title={`${r.fullName}: ${r[b.key]} ${b.label.toLowerCase()}`}
-                              className="h-full first:rounded-l-full last:rounded-r-full"
-                              style={{ flexGrow: r[b.key], backgroundColor: TONE[b.tone].fill }}
-                            />
-                          ))}
-                        </span>
-                      </span>
-                      <span className="num text-right text-[13px] font-semibold text-ink">{total}</span>
-                      <span className="flex justify-end">
-                        {r.readiness === null ? (
-                          <span className="text-[13px] text-faint">–</span>
-                        ) : (
-                          <ScorePill score={r.readiness} />
-                        )}
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-            {data.length > rows.length && (
-              <p className="mt-3 text-[12.5px] text-muted">
-                Showing the {rows.length} most urgent of {data.length} repositories.
-              </p>
-            )}
-          </>
-        )}
+        <RepositoryRiskChart data={data} />
       </div>
     </Card>
   );
