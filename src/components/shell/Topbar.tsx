@@ -9,6 +9,7 @@ export function Topbar() {
   const router = useRouter();
   const [user, setUser] = useState<{ login: string; name: string | null; avatarUrl?: string } | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -81,17 +82,48 @@ export function Topbar() {
         )}
 
         {/* Bell */}
-        <button
-          className="p-1.5 rounded-md relative"
-          style={{ color: "var(--color-ink-muted)" }}
-          aria-label="Notifications"
-        >
-          <Bell size={16} />
-          <span
-            className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full"
-            style={{ backgroundColor: "var(--color-accent)" }}
-          />
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="p-1.5 rounded-md relative hover:bg-[var(--color-surface-2)]"
+            style={{ color: "var(--color-ink-muted)" }}
+            aria-label="Notifications"
+          >
+            <Bell size={16} />
+            <span
+              className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full"
+              style={{ backgroundColor: "var(--color-accent)" }}
+            />
+          </button>
+          
+          {showNotifications && (
+            <div 
+              className="absolute right-0 mt-2 w-72 rounded-xl shadow-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2"
+            >
+              <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
+                <span className="font-semibold text-sm text-[var(--color-ink)]">Notifications</span>
+                <span className="text-xs text-[var(--color-accent)] font-medium bg-[rgba(47,91,255,0.1)] px-2 py-0.5 rounded-full">2 New</span>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                <div className="px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-2)] transition-colors cursor-pointer">
+                  <p className="text-sm font-medium text-[var(--color-ink)] mb-0.5">Scan Completed</p>
+                  <p className="text-xs text-[var(--color-ink-muted)]">PQC scan finished on aws/us-east-1/production-mock with 2 findings.</p>
+                  <p className="text-[10px] text-[var(--color-ink-faint)] mt-1.5">Just now</p>
+                </div>
+                <div className="px-4 py-3 hover:bg-[var(--color-surface-2)] transition-colors cursor-pointer">
+                  <p className="text-sm font-medium text-[var(--color-ink)] mb-0.5">Welcome to ECDAT Atlas</p>
+                  <p className="text-xs text-[var(--color-ink-muted)]">Your workspace is ready. Try connecting a repository to get started.</p>
+                  <p className="text-[10px] text-[var(--color-ink-faint)] mt-1.5">1 hour ago</p>
+                </div>
+              </div>
+              <div className="px-4 py-2 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] text-center">
+                <button className="text-xs font-medium text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]">
+                  Mark all as read
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
       </div>
     </header>

@@ -165,13 +165,13 @@ export default function VulnerabilitiesPage() {
                       <span style={{ color: "var(--color-ink)" }}>{f.title}</span>
                     </td>
                     <td style={{ ...tdStyle, maxWidth: "260px" }}>
-                      <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{f.detail}</span>
+                      <span className="text-xs truncate block w-full" style={{ color: "var(--color-ink-muted)" }} title={f.detail}>{f.detail}</span>
                     </td>
-                    <td style={tdStyle}>
-                      <span style={{ color: "var(--color-ink-muted)" }}>{f.affectedComponent}</span>
+                    <td style={{ ...tdStyle, maxWidth: "180px" }}>
+                      <span className="truncate block w-full" style={{ color: "var(--color-ink-muted)" }} title={f.affectedComponent}>{f.affectedComponent}</span>
                     </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-accent)" }}>{f.repositoryFullName}</span>
+                    <td style={{ ...tdStyle, maxWidth: "180px" }}>
+                      <span className="text-xs truncate block w-full" style={{ color: "var(--color-accent)" }} title={f.repositoryFullName}>{f.repositoryFullName}</span>
                     </td>
                     <td style={tdStyle}>
                       {(() => {

@@ -100,8 +100,9 @@ export default function ScansPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
-      <div className="flex items-center justify-between flex-wrap gap-4">
+    <>
+      <div className="flex flex-col gap-6 animate-fade-in">
+        <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-2xl font-bold" style={{ color: "var(--color-ink)" }}>
           Scans
           <span
@@ -282,11 +283,13 @@ export default function ScansPage() {
         </div>
       </div>
 
+      </div>
+      
       {/* Live log drawer */}
       <ScanLogDrawer
         scanId={selectedScanId}
         onClose={() => setSelectedScanId(null)}
       />
-    </div>
+    </>
   );
 }
