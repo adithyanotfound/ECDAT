@@ -103,12 +103,10 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
 
       {/* Modal */}
       <div
-        className="fixed inset-4 md:inset-8 z-50 flex flex-col rounded-xl overflow-hidden shadow-2xl"
+        className="fixed inset-4 md:inset-12 z-50 flex flex-col rounded-xl overflow-hidden shadow-2xl"
         style={{
           backgroundColor: "var(--color-surface)",
           border: "1px solid var(--color-border)",
-          minHeight: "60vh",
-          maxHeight: "90vh"
         }}
       >
         {/* Header */}
@@ -187,23 +185,24 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
           ref={scrollRef}
           className="flex-1 overflow-y-auto p-4 font-mono"
           style={{
-            fontSize: "12px",
+            fontSize: "13px",
             lineHeight: "1.6",
-            backgroundColor: "var(--color-bg)",
+            backgroundColor: "#0d1117",
+            color: "#e6edf3",
           }}
         >
           {logs.length === 0 && status === "streaming" && (
             <div
               className="flex items-center gap-2 text-xs"
-              style={{ color: "var(--color-ink-faint)" }}
+              style={{ color: "#7d8590" }}
             >
               <Loader2 size={12} className="animate-spin" />
               Waiting for logs…
             </div>
           )}
           {logs.map((log) => (
-            <div key={log.id} className="flex gap-3 mb-1">
-              <span style={{ color: "var(--color-ink-faint)", flexShrink: 0 }}>
+            <div key={log.id} className="flex flex-row items-start gap-3 mb-1">
+              <span style={{ color: "#7d8590", flexShrink: 0 }}>
                 {new Date(log.ts).toLocaleTimeString("en-US", {
                   hour12: false,
                   hour: "2-digit",
@@ -212,21 +211,25 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
                 })}
               </span>
               <span
-                style={{ color: levelColor[log.level] ?? "var(--color-ink-muted)", flexShrink: 0 }}
+                style={{ 
+                  color: log.level === "ERROR" ? "#f85149" : log.level === "WARN" ? "#d29922" : log.level === "DEBUG" ? "#7d8590" : "#3fb950", 
+                  flexShrink: 0,
+                  width: "45px"
+                }}
               >
                 {levelPrefix[log.level] ?? log.level}
               </span>
-              <span style={{ color: "var(--color-ink)", wordBreak: "break-all" }}>
+              <span style={{ wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
                 {log.message}
               </span>
             </div>
           ))}
           {status === "done" && (
             <div
-              className="mt-3 pt-3 text-xs"
+              className="mt-4 pt-4 text-xs font-semibold"
               style={{
-                color: "var(--color-safe)",
-                borderTop: "1px solid var(--color-border)",
+                color: "#3fb950",
+                borderTop: "1px solid #30363d",
               }}
             >
               ✓ Scan completed — {logs.length} log entries
@@ -234,15 +237,15 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
           )}
           {status === "failed" && (
             <div
-              className="mt-3 pt-3 text-xs"
+              className="mt-4 pt-4 text-xs font-semibold"
               style={{
-                color: "var(--color-critical)",
-                borderTop: "1px solid var(--color-border)",
+                color: "#f85149",
+                borderTop: "1px solid #30363d",
               }}
             >
-              <div className="font-semibold mb-1">✕ Scan failed</div>
+              <div className="mb-1">✕ Scan failed</div>
               {errorMessage && (
-                <div className="opacity-90 mt-1 whitespace-pre-wrap font-sans text-sm">
+                <div className="opacity-90 mt-2 whitespace-pre-wrap font-sans text-sm font-normal text-[#e6edf3]">
                   {errorMessage}
                 </div>
               )}
