@@ -5,7 +5,7 @@
  * Each row reads as "from → to" first; expanding it shows the standard,
  * the performance and size impact, and notes.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ChevronDown, Gauge, HardDrive, Lightbulb, X } from "lucide-react";
 import { PageHeader } from "@/components/ui/Card";
@@ -42,7 +42,6 @@ export default function RecommendationsPage() {
   const [effort, setEffort] = useState<Effort | "">("");
   const [repositoryId, setRepositoryId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,31 +63,36 @@ export default function RecommendationsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const fetchPage = useCallback(async () => {
-    if (!ready) return;
-    setLoading(true);
-    try {
-      const url = new URL("/api/recommendations", window.location.origin);
-      url.searchParams.set("page", String(page));
-      url.searchParams.set("pageSize", String(PAGE_SIZE));
-      url.searchParams.set("sort", "effort");
-      if (debounced) url.searchParams.set("search", debounced);
-      if (effort) url.searchParams.set("effort", effort);
-      if (repositoryId) url.searchParams.set("repositoryId", repositoryId);
-      const data = await (await fetch(url.toString())).json();
-      setItems(data.items ?? []);
-      setTotal(data.total ?? 0);
-      setStats(data.stats ?? { total: 0, high: 0, medium: 0, low: 0 });
-    } catch {
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [ready, page, debounced, effort, repositoryId]);
+  // The request for the current filters. Loading is derived by comparing it with the
+  // last request that finished, so the effect below never sets state synchronously.
+  const url = useMemo(() => {
+    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), sort: "effort" });
+    if (debounced) p.set("search", debounced);
+    if (effort) p.set("effort", effort);
+    if (repositoryId) p.set("repositoryId", repositoryId);
+    return `/api/recommendations?${p}`;
+  }, [page, debounced, effort, repositoryId]);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const loading = !ready || loadedUrl !== url;
 
   useEffect(() => {
-    fetchPage();
-  }, [fetchPage]);
+    if (!ready) return;
+    // Ignore a response that arrives after the filters have changed again.
+    let current = true;
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!current) return;
+        setItems(data.items ?? []);
+        setTotal(data.total ?? 0);
+        setStats(data.stats ?? { total: 0, high: 0, medium: 0, low: 0 });
+      })
+      .catch(() => current && setItems([]))
+      .finally(() => current && setLoadedUrl(url));
+    return () => {
+      current = false;
+    };
+  }, [ready, url]);
 
   const pick = (e: Effort | "") => {
     setEffort(e);

@@ -85,17 +85,17 @@ export default function RepositoriesPage() {
   const toastSeq = useRef(0);
   const [syncing, setSyncing] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/repositories");
-      const data = await r.json();
-      setRepos(Array.isArray(data) ? data : []);
-    } catch {
-      setRepos([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // State is only set in the request's callbacks, so calling this from an effect
+  // (and from the buttons) doesn't trigger a synchronous re-render.
+  const load = useCallback(
+    () =>
+      fetch("/api/repositories")
+        .then((r) => r.json())
+        .then((data) => setRepos(Array.isArray(data) ? data : []))
+        .catch(() => setRepos([]))
+        .finally(() => setLoading(false)),
+    [],
+  );
 
   useEffect(() => {
     load();

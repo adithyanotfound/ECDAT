@@ -6,7 +6,7 @@
  * means and where it is. /assets/vulnerabilities?repositoryId=… narrows to
  * one repository (linked from that repository's page).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertOctagon, AlertTriangle, ChevronRight, CircleDot, Download, FolderGit2, X } from "lucide-react";
 import type { Finding, Severity } from "@/fixtures/types";
@@ -48,7 +48,6 @@ export default function VulnerabilitiesPage() {
   const [status, setStatus] = useState<Finding["status"] | "">("Open");
   const [repositoryId, setRepositoryId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Finding | null>(null);
 
   useEffect(() => {
@@ -68,31 +67,37 @@ export default function VulnerabilitiesPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const fetchPage = useCallback(async () => {
-    if (!ready) return;
-    setLoading(true);
-    try {
-      const url = new URL("/api/findings", window.location.origin);
-      url.searchParams.set("page", String(page));
-      url.searchParams.set("pageSize", String(PAGE_SIZE));
-      if (debounced) url.searchParams.set("search", debounced);
-      if (severity) url.searchParams.set("severity", severity);
-      if (status) url.searchParams.set("status", status);
-      if (repositoryId) url.searchParams.set("repositoryId", repositoryId);
-      const data = await (await fetch(url.toString())).json();
-      setFindings(data.items ?? []);
-      setTotal(data.total ?? 0);
-      setCounts({ open: data.openCount ?? 0, critical: data.criticalCount ?? 0, high: data.highCount ?? 0 });
-    } catch {
-      setFindings([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [ready, page, debounced, severity, status, repositoryId]);
+  // The request for the current filters. Loading is derived by comparing it with the
+  // last request that finished, so the effect below never sets state synchronously.
+  const url = useMemo(() => {
+    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (debounced) p.set("search", debounced);
+    if (severity) p.set("severity", severity);
+    if (status) p.set("status", status);
+    if (repositoryId) p.set("repositoryId", repositoryId);
+    return `/api/findings?${p}`;
+  }, [page, debounced, severity, status, repositoryId]);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const loading = !ready || loadedUrl !== url;
 
   useEffect(() => {
-    fetchPage();
-  }, [fetchPage]);
+    if (!ready) return;
+    // Ignore a response that arrives after the filters have changed again.
+    let current = true;
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!current) return;
+        setFindings(data.items ?? []);
+        setTotal(data.total ?? 0);
+        setCounts({ open: data.openCount ?? 0, critical: data.criticalCount ?? 0, high: data.highCount ?? 0 });
+      })
+      .catch(() => current && setFindings([]))
+      .finally(() => current && setLoadedUrl(url));
+    return () => {
+      current = false;
+    };
+  }, [ready, url]);
 
   const repoName = repositoryId ? (findings[0]?.repositoryFullName ?? "one repository") : null;
   const exportHref = `/api/findings/export${repositoryId ? `?repositoryId=${encodeURIComponent(repositoryId)}` : ""}`;

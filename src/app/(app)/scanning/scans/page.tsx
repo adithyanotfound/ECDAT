@@ -5,7 +5,7 @@
  * its log live or see what changed since the one before. Opening
  * /scanning/scans?scan=<id> jumps straight to that scan.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Cpu } from "lucide-react";
 import type { Scan, ScanStatus } from "@/fixtures/types";
 import { PageHeader } from "@/components/ui/Card";
@@ -27,38 +27,44 @@ export default function ScansPage() {
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [status, setStatus] = useState<ScanStatus | "">("");
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Scan | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const fetchPage = useCallback(
-    async (background = false) => {
-      if (!background) setLoading(true);
-      try {
-        const url = new URL("/api/scans", window.location.origin);
-        url.searchParams.set("page", String(page));
-        url.searchParams.set("pageSize", String(PAGE_SIZE));
-        if (debounced) url.searchParams.set("search", debounced);
-        if (status) url.searchParams.set("status", status);
-        const res = await fetch(url.toString());
-        const data = await res.json();
-        setScans(data.items ?? []);
-        setTotal(data.total ?? 0);
-      } catch {
-        if (!background) setScans([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [page, debounced, status],
-  );
+  // The request for the current filters. Loading is derived by comparing it with the
+  // last request that finished, so the effect below never sets state synchronously.
+  const url = useMemo(() => {
+    const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (debounced) p.set("search", debounced);
+    if (status) p.set("status", status);
+    return `/api/scans?${p}`;
+  }, [page, debounced, status]);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const loading = loadedUrl !== url;
 
   useEffect(() => {
-    fetchPage();
+    // Ignore a response that arrives after the filters have changed again.
+    let current = true;
+    const load = (background: boolean) =>
+      fetch(url)
+        .then((r) => r.json())
+        .then((data) => {
+          if (!current) return;
+          setScans(data.items ?? []);
+          setTotal(data.total ?? 0);
+        })
+        .catch(() => {
+          // A failed background refresh keeps the rows already shown.
+          if (current && !background) setScans([]);
+        })
+        .finally(() => current && setLoadedUrl(url));
+    load(false);
     // Keep running scans fresh without flashing the table.
-    const id = setInterval(() => fetchPage(true), 5000);
-    return () => clearInterval(id);
-  }, [fetchPage]);
+    const id = setInterval(() => load(true), 5000);
+    return () => {
+      current = false;
+      clearInterval(id);
+    };
+  }, [url]);
 
   useEffect(() => {
     const t = setTimeout(() => {

@@ -8,8 +8,7 @@ import type { CryptoKind, FindingStatus, Severity } from "./src/generated/prisma
 async function main() {
   console.log("Seeding data for admin user from fixtures...");
 
-  // 1. Get the admin's existing AWS repo if any (to not delete it)
-  const existingAws = await prisma.repository.findMany({ where: { owner: "admin", sourceType: "AWS" } });
+  // AWS sources are left alone: only non-AWS repositories are cleared below.
 
   // Clean up non-AWS repos and their dependents for admin to start fresh
   const reposToDelete = await prisma.repository.findMany({ where: { owner: "admin", sourceType: { not: "AWS" } } });
@@ -78,7 +77,7 @@ async function main() {
 
     console.log(`Inserting asset: ${a.name}`);
     const scan = await prisma.scan.findFirst({ where: { repositoryId: a.repositoryId } });
-    const asset = await prisma.cryptoAsset.create({
+    await prisma.cryptoAsset.create({
       data: {
         id: a.id,
         repository: { connect: { id: a.repositoryId } },

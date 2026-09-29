@@ -28,12 +28,12 @@ const Magnet: React.FC<MagnetProps> = ({
   const [isActive, setIsActive] = useState<boolean>(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const magnetRef = useRef<HTMLDivElement>(null);
+  // Disabled means no pull, whatever the last pointer position was.
+  const offset = disabled ? { x: 0, y: 0 } : position;
 
   useEffect(() => {
-    if (disabled) {
-      setPosition({ x: 0, y: 0 });
-      return;
-    }
+    // Adapted: no state reset here; a disabled magnet simply renders at rest (see `offset`).
+    if (disabled) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!magnetRef.current) return;
@@ -74,7 +74,7 @@ const Magnet: React.FC<MagnetProps> = ({
       <div
         className={innerClassName}
         style={{
-          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+          transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
           transition: transitionStyle,
           willChange: 'transform'
         }}

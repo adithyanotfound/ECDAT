@@ -121,7 +121,7 @@ async function main() {
       isDefault: true,
     },
   });
-  const profileDeep = await prisma.scanProfile.create({
+  await prisma.scanProfile.create({
     data: {
       name: "Deep Scan",
       rulePackIds: ["core", "secrets", "certificates", "keys", "protocols", "dependencies", "iac"],
@@ -131,7 +131,7 @@ async function main() {
       isDefault: false,
     },
   });
-  const profileConfig = await prisma.scanProfile.create({
+  await prisma.scanProfile.create({
     data: {
       name: "Config-Only Scan",
       rulePackIds: ["protocols", "iac"],
@@ -144,7 +144,6 @@ async function main() {
   console.log("✓ Created scan profiles");
 
   // ── Repositories + Scans + Assets + Findings ──────────────────────────────
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const now = new Date();
 
   // We'll create 9 base repos from config + 51 more synthetic ones to hit 60 total
