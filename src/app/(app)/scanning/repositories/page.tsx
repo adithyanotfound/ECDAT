@@ -157,7 +157,7 @@ export default function RepositoriesPage() {
   };
 
   // Pull in this App's installations on the user's GitHub account, in case
-  // GitHub's post-install redirect or a webhook never reached ECDAT.
+  // GitHub's post-install redirect or a webhook never reached Vajra.
   const syncWithGithub = async () => {
     setSyncing(true);
     try {
@@ -168,7 +168,7 @@ export default function RepositoriesPage() {
         notify({
           tone: "error",
           title: "The GitHub App isn't installed on your account",
-          body: "Install it and choose which repositories ECDAT Atlas can read, then sync again.",
+          body: "Install it and choose which repositories Vajra can read, then sync again.",
           action: { label: "Install the GitHub App", href: `https://github.com/apps/${APP_SLUG}/installations/new` },
         });
       } else {
@@ -218,7 +218,7 @@ export default function RepositoriesPage() {
       <PageHeader
         eyebrow="Connect & scan"
         title="Repositories"
-        description="The code and cloud accounts ECDAT Atlas watches. Each one is scanned when it's added, whenever you press Scan now, and on every push if it came through the GitHub App."
+        description="The code and cloud accounts Vajra watches. Each one is scanned when it's added, whenever you press Scan now, and on every push if it came through the GitHub App."
         actions={
           <>
             <Button onClick={load} aria-label="Refresh">
@@ -474,7 +474,7 @@ export default function RepositoriesPage() {
         title={`Remove ${toDelete?.name ?? "repository"}?`}
         description={
           <>
-            This deletes <b className="text-ink">{toDelete?.fullName}</b> from ECDAT Atlas along with every scan, asset
+            This deletes <b className="text-ink">{toDelete?.fullName}</b> from Vajra along with every scan, asset
             and finding from it. Your code on GitHub or AWS isn&apos;t touched. This can&apos;t be undone.
           </>
         }

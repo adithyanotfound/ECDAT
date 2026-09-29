@@ -33,12 +33,24 @@ async function claimNextJob() {
         "lockedAt" = now(),
         attempts = attempts + 1
     WHERE id = (
-      SELECT id FROM "Job"
-      WHERE (status = 'QUEUED' AND "runAfter" <= now())
-         -- A job whose worker vanished mid-scan (a serverless instance that was
-         -- frozen or recycled) is picked up again, within its attempt limit.
-         OR (status = 'RUNNING' AND "lockedAt" < now() - interval '15 minutes' AND attempts < "maxAttempts")
-      ORDER BY "runAfter" ASC
+      SELECT j.id FROM "Job" j
+      WHERE ((j.status = 'QUEUED' AND j."runAfter" <= now())
+             -- A job whose worker vanished mid-scan (a serverless instance that was
+             -- frozen or recycled) is picked up again, within its attempt limit.
+          OR (j.status = 'RUNNING' AND j."lockedAt" < now() - interval '15 minutes' AND j.attempts < j."maxAttempts"))
+        -- One scan per repository at a time: two scans saving the same assets at
+        -- once collide. Wait while another live job for this repository runs.
+        AND NOT EXISTS (
+          SELECT 1 FROM "Job" r
+          WHERE r.status = 'RUNNING'
+            AND r.id <> j.id
+            AND r."lockedAt" >= now() - interval '15 minutes'
+            AND r.payload->>'repositoryId' = j.payload->>'repositoryId'
+        )
+        -- ...and two workers claiming at the same instant can't both take jobs for
+        -- one repository: the lock lasts only for this statement's transaction.
+        AND pg_try_advisory_xact_lock(hashtext('scan:' || (j.payload->>'repositoryId')))
+      ORDER BY j."runAfter" ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )

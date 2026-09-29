@@ -1,6 +1,6 @@
 "use client";
 
-// BlurText from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for ECDAT Atlas where noted.
+// BlurText from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for Vajra where noted.
 import { motion, type Transition, type Easing } from 'motion/react'
 import { useEffect, useRef, useState, useMemo } from 'react'
 

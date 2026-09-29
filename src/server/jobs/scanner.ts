@@ -151,7 +151,7 @@ export async function runScanner(
         ruleId: hit.ruleId,
       };
 
-      const asset = await prisma.cryptoAsset.upsert({
+      const asset = await retryOnConflict(() => prisma.cryptoAsset.upsert({
         where: { repositoryId_fingerprint: { repositoryId, fingerprint: hit.fingerprint } },
         create: {
           repositoryId,
@@ -205,7 +205,7 @@ export async function runScanner(
             },
           },
         },
-      });
+      }));
       assetsWritten++;
 
       if (hit.quantumSafe === false) {
@@ -251,11 +251,13 @@ export async function runScanner(
               data: { repositoryId, code: findingCode, firstSeenScanId: scanId, ...findingData },
             });
 
-        await prisma.findingAsset.upsert({
-          where: { findingId_cryptoAssetId: { findingId: finding.id, cryptoAssetId: asset.id } },
-          create: { findingId: finding.id, cryptoAssetId: asset.id },
-          update: {},
-        });
+        await retryOnConflict(() =>
+          prisma.findingAsset.upsert({
+            where: { findingId_cryptoAssetId: { findingId: finding.id, cryptoAssetId: asset.id } },
+            create: { findingId: finding.id, cryptoAssetId: asset.id },
+            update: {},
+          }),
+        );
         findingsWritten++;
       }
     }
@@ -360,4 +362,20 @@ function dedupeRecommendations(hits: NormalizedHit[]) {
 
 async function appendLog(scanId: string, level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string) {
   await prisma.scanLog.create({ data: { scanId, level, message } }).catch(() => {});
+}
+
+/**
+ * Prisma's upsert is "look up, then insert", so if another writer inserts the
+ * same row in between, the insert fails with a unique-constraint error (P2002).
+ * Running it once more then finds the row and updates it. Scans of one
+ * repository are already serialised by the job queue; this is the last line
+ * of defence, not the main guard.
+ */
+async function retryOnConflict<T>(op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === "P2002") return op();
+    throw err;
+  }
 }

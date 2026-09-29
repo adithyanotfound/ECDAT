@@ -46,7 +46,7 @@ export function GettingStarted() {
         <p className="text-xs font-semibold tracking-[0.14em] text-gold-ink uppercase">Get started</p>
         <h2 className="mt-2 text-xl font-semibold tracking-tight text-ink">Connect something to scan</h2>
         <p className="mt-1.5 max-w-xl text-[14px] leading-relaxed text-muted">
-          ECDAT Atlas looks through code and cloud accounts for algorithms, keys and certificates, then tells you which
+          Vajra looks through code and cloud accounts for algorithms, keys and certificates, then tells you which
           ones a quantum computer could break. Your first results appear a minute or two after connecting.
         </p>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-// Magnet from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for ECDAT Atlas where noted.
+// Magnet from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for Vajra where noted.
 import React, { useState, useEffect, useRef, type ReactNode, type HTMLAttributes } from 'react';
 
 interface MagnetProps extends HTMLAttributes<HTMLDivElement> {

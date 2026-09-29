@@ -8,7 +8,7 @@ import { verifySessionToken } from "@/server/auth/session";
 import { LandingPage } from "@/components/landing/LandingPage";
 
 export const metadata: Metadata = {
-  title: { absolute: "ECDAT Atlas · Find the cryptography quantum computers will break" },
+  title: { absolute: "Vajra · Find the cryptography quantum computers will break" },
 };
 
 export default async function Home() {

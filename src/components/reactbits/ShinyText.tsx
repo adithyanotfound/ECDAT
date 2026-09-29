@@ -1,6 +1,6 @@
 "use client";
 
-// ShinyText from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for ECDAT Atlas where noted.
+// ShinyText from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for Vajra where noted.
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, useMotionValue, useAnimationFrame, useTransform, useReducedMotion } from 'motion/react';
 

@@ -1,6 +1,6 @@
 "use client";
 
-// SpotlightCard from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for ECDAT Atlas where noted.
+// SpotlightCard from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for Vajra where noted.
 import React, { useRef, useState } from 'react';
 
 interface Position {

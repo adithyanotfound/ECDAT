@@ -160,7 +160,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               </div>
             )}
             <p className="mt-4 text-center text-xs text-muted">
-              ECDAT Atlas only asks GitHub for your public profile and email address.
+              Vajra only asks GitHub for your public profile and email address.
             </p>
           </div>
         </div>

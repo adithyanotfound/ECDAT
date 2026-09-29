@@ -11,7 +11,7 @@ import { ArrowRight } from "lucide-react";
 const once = { once: true, margin: "-40px" } as const;
 const ease = [0.2, 0, 0, 1] as const;
 
-/** Where ECDAT Atlas looks: chips popping in one after another. */
+/** Where Vajra looks: chips popping in one after another. */
 export function SourceChips() {
   const sources = [
     ["Source code", "#b3263c"],

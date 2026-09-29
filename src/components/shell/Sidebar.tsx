@@ -130,7 +130,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
             href="/dashboard"
             onClick={onMobileClose}
             className="flex items-center gap-2.5"
-            aria-label="ECDAT Atlas dashboard"
+            aria-label="Vajra dashboard"
           >
             <BrandMark size={30} onDark />
             {!narrow && <BrandName onDark />}

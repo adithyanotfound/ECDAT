@@ -29,7 +29,7 @@ export async function postScanCheckRun(summary: CheckRunSummary): Promise<void> 
     await octokit.rest.checks.create({
       owner: summary.owner,
       repo: summary.repo,
-      name: "ECDAT Atlas — Cryptographic Scan",
+      name: "Vajra — Cryptographic Scan",
       head_sha: summary.commitSha,
       status: "completed",
       conclusion: failing ? "failure" : neutral ? "neutral" : "success",
@@ -45,7 +45,7 @@ export async function postScanCheckRun(summary: CheckRunSummary): Promise<void> 
           `**New critical findings:** ${summary.newCriticalCount}`,
           `**New high findings:** ${summary.newHighCount}`,
           "",
-          "See the ECDAT Atlas dashboard for the full inventory and PQC recommendations.",
+          "See the Vajra dashboard for the full inventory and PQC recommendations.",
         ].join("\n"),
       },
     });

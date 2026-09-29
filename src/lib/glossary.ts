@@ -1,5 +1,5 @@
 /**
- * Plain-language explanations of the terms ECDAT Atlas uses, shown in the ⓘ
+ * Plain-language explanations of the terms Vajra uses, shown in the ⓘ
  * hints across the app. Each one says what the thing is, then how to read it.
  * Written for someone who is not a cryptographer.
  */

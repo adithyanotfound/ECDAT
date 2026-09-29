@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="ecdat-inventory-${new Date().toISOString().slice(0, 10)}.json"`,
+        "Content-Disposition": `attachment; filename="vajra-inventory-${new Date().toISOString().slice(0, 10)}.json"`,
       },
     },
   );

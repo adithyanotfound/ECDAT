@@ -112,7 +112,7 @@ export function buildCbom(input: CbomInput) {
         version: input.commitSha,
       },
       tools: {
-        components: [{ type: "application", name: "ECDAT Atlas", version: "1.0.0" }],
+        components: [{ type: "application", name: "Vajra", version: "1.0.0" }],
       },
     },
     components,

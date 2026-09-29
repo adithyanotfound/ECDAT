@@ -6,11 +6,11 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 
 export const metadata: Metadata = {
   title: {
-    default: "ECDAT Atlas · Find the cryptography quantum computers will break",
-    template: "%s · ECDAT Atlas",
+    default: "Vajra · Find the cryptography quantum computers will break",
+    template: "%s · Vajra",
   },
   description:
-    "ECDAT Atlas finds every algorithm, key and certificate in your code and cloud, shows which ones quantum computers will break, and tells you what to move to first.",
+    "Vajra finds every algorithm, key and certificate in your code and cloud, shows which ones quantum computers will break, and tells you what to move to first.",
   keywords: ["cryptography", "PQC", "CBOM", "quantum readiness", "NTRO", "security"],
 };
 

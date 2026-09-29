@@ -1,6 +1,6 @@
 /**
- * The ECDAT Atlas mark: a gold globe (an atlas) with one meridian picked out
- * as a key bit, on a charcoal tile. Pure SVG, so it's crisp at any size.
+ * The Vajra mark: a gold globe with one meridian picked out as a key bit,
+ * on a charcoal tile. Pure SVG, so it's crisp at any size.
  */
 export function BrandMark({ size = 32, onDark = false }: { size?: number; onDark?: boolean }) {
   return (
@@ -17,7 +17,7 @@ export function BrandMark({ size = 32, onDark = false }: { size?: number; onDark
 export function BrandName({ onDark = false }: { onDark?: boolean }) {
   return (
     <span className={`text-[15px] font-semibold tracking-tight ${onDark ? "text-white" : "text-ink"}`}>
-      ECDAT <span className={onDark ? "text-gold-bright" : "text-gold-ink"}>Atlas</span>
+      Vajra
     </span>
   );
 }

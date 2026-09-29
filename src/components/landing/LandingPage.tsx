@@ -105,12 +105,12 @@ const SCREENS = [
 
 const FAQ = [
   [
-    "What does ECDAT Atlas actually look at?",
+    "What does Vajra actually look at?",
     "Source code, dependency manifests, certificate and key files, server config (TLS and SSH), infrastructure-as-code, and, if you connect AWS, your KMS keys and ACM certificates. It records what cryptography is used and where, not your data.",
   ],
   [
     "Do I need to install anything to try it?",
-    "No. Public GitHub repositories can be added by name. Private repositories and scans on every push need the ECDAT Atlas GitHub App, which only asks for read access.",
+    "No. Public GitHub repositories can be added by name. Private repositories and scans on every push need the Vajra GitHub App, which only asks for read access.",
   ],
   [
     "Is my code stored?",
@@ -126,7 +126,7 @@ const FAQ = [
   ],
   [
     "What's a CBOM, and why would I need one?",
-    "A Cryptography Bill of Materials: a standard list (CycloneDX 1.6) of every cryptographic component in a system. Auditors and regulators increasingly ask for one, and ECDAT Atlas produces it after every scan.",
+    "A Cryptography Bill of Materials: a standard list (CycloneDX 1.6) of every cryptographic component in a system. Auditors and regulators increasingly ask for one, and Vajra produces it after every scan.",
   ],
 ] as const;
 
@@ -245,7 +245,7 @@ export function LandingPage({ signedIn }: { signedIn: boolean }) {
               transition={{ duration: 0.6, delay: 0.5 }}
               className="mx-auto mt-8 max-w-2xl text-[17px] leading-relaxed text-ink-2 sm:text-lg"
             >
-              ECDAT Atlas scans your GitHub repositories and AWS accounts for every algorithm, key and certificate,
+              Vajra scans your GitHub repositories and AWS accounts for every algorithm, key and certificate,
               shows which ones a quantum computer could break, and tells you what to move to first.
             </motion.p>
 
@@ -291,7 +291,7 @@ export function LandingPage({ signedIn }: { signedIn: boolean }) {
                 {/* eslint-disable-next-line @next/next/no-img-element -- static WebP, already sized */}
                 <img
                   src="/landing/dashboard.webp"
-                  alt="ECDAT Atlas dashboard: quantum readiness 5 out of 10, with high-risk assets and where the risk sits"
+                  alt="Vajra dashboard: quantum readiness 5 out of 10, with high-risk assets and where the risk sits"
                   width={2880}
                   height={1800}
                   fetchPriority="high"
@@ -314,7 +314,7 @@ export function LandingPage({ signedIn }: { signedIn: boolean }) {
         </section>
 
         {/* ── What it finds (marquee) ───────────────────────────────── */}
-        <section className="py-14" aria-label="What ECDAT Atlas finds">
+        <section className="py-14" aria-label="What Vajra finds">
           <p className="text-center text-[13px] font-medium tracking-wide text-muted uppercase">
             What it finds, in minutes
           </p>
@@ -566,7 +566,7 @@ export function LandingPage({ signedIn }: { signedIn: boolean }) {
             <div className="flex items-center gap-2.5">
               <BrandMark size={26} />
               <BrandName />
-              <span>· Enterprise Cryptographic Discovery &amp; Analysis Tool</span>
+              <span>· Cryptographic discovery and post-quantum readiness</span>
             </div>
             <p>CycloneDX 1.6 · NIST FIPS 203, 204, 205</p>
           </div>
@@ -712,7 +712,7 @@ function BrowserFrame({ path, children }: { path: string; children: ReactNode })
         <span className="size-3 rounded-full bg-line-strong" />
         <span className="size-3 rounded-full bg-line-strong" />
         <span className="mx-auto hidden rounded-lg bg-surface px-10 py-1 text-xs text-muted sm:block">
-          ecdat-atlas.app/{path}
+          vajra.app/{path}
         </span>
       </div>
       {children}
@@ -823,7 +823,7 @@ function ProductTour() {
               <motion.img
                 key={screen.key}
                 src={screen.src}
-                alt={`ECDAT Atlas ${screen.label.toLowerCase()} screen`}
+                alt={`Vajra ${screen.label.toLowerCase()} screen`}
                 width={2880}
                 height={1800}
                 loading="lazy"

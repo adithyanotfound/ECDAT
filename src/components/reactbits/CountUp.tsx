@@ -1,6 +1,6 @@
 "use client";
 
-// CountUp from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for ECDAT Atlas where noted.
+// CountUp from React Bits (https://reactbits.dev), MIT + Commons Clause. Adapted for Vajra where noted.
 import { useInView, useMotionValue, useSpring } from 'motion/react';
 import { useCallback, useEffect, useRef } from 'react';
 

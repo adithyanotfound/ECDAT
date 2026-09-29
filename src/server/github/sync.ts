@@ -1,22 +1,22 @@
 /**
- * Brings one GitHub App installation into ECDAT Atlas: records the
+ * Brings one GitHub App installation into Vajra: records the
  * installation, adds every repository it can see, and queues a first scan for
  * any repository that has never been scanned.
  *
  * Used by both GitHub's post-install redirect (/api/github/setup) and the
  * "Sync with GitHub" button (/api/github/sync), so a missed redirect can
  * always be recovered from inside the app. Safe to run repeatedly: existing
- * rows are updated, and repositories that already have a scan aren't queued again.
+ * rows are updated, and repositories that already have a scan aren't queued again,
+ * even when two syncs of the same installation run at the same moment.
  */
 import { prisma } from "@/server/db/client";
 import { getAppOctokit, getInstallationOctokit } from "@/server/github/auth";
-import { enqueueJob } from "@/server/jobs/queue";
 
 export interface SyncResult {
   accountLogin: string;
   /** Repositories the installation can see. */
   repositories: number;
-  /** Repositories that weren't in ECDAT before this sync. */
+  /** Repositories that weren't in Vajra before this sync. */
   added: number;
   /** First scans queued by this sync. */
   scansStarted: number;
@@ -62,39 +62,65 @@ export async function syncInstallation(installationId: number): Promise<SyncResu
       scanEnabled: true,
     };
 
-    // Match by GitHub id, or by name for a repository first added by hand
-    // (names are unique, so creating a second row would fail).
-    const existing = await prisma.repository.findFirst({
+    // The commit is only needed for a first scan; look it up outside the transaction
+    // so the lock below is held for as short a time as possible.
+    const known = await prisma.repository.findFirst({
       where: { OR: [{ githubRepoId: ghRepo.id }, { fullName: ghRepo.full_name }] },
-      select: { id: true },
+      select: { _count: { select: { scans: true } } },
     });
-    const repo = existing
-      ? await prisma.repository.update({ where: { id: existing.id }, data: details })
-      : await prisma.repository.create({
-          data: { ...details, fullName: ghRepo.full_name, owner: ghRepo.owner.login, name: ghRepo.name },
-        });
-    if (!existing) added += 1;
-
-    const alreadyScanned = await prisma.scan.findFirst({ where: { repositoryId: repo.id }, select: { id: true } });
-    if (alreadyScanned) continue;
-
-    const commitSha = ghRepo.pushed_at
-      ? await latestCommitSha(octokit, ghRepo.owner.login, ghRepo.name, branch)
-      : "unknown";
+    const commitSha =
+      (known?._count.scans ?? 0) === 0 && ghRepo.pushed_at
+        ? await latestCommitSha(octokit, ghRepo.owner.login, ghRepo.name, branch)
+        : "unknown";
     const ref = `refs/heads/${branch}`;
-    const scan = await prisma.scan.create({
-      data: { repositoryId: repo.id, trigger: "INITIAL", status: "QUEUED", commitSha, ref },
+
+    // GitHub's post-install redirect and its "installation" webhook usually arrive
+    // together, and on serverless hosts they run in parallel. A per-repository
+    // lock (released when the transaction ends, so it's safe on a pooled
+    // connection) makes the second one wait, then see the first one's rows:
+    // one repository row and at most one first scan, never two.
+    const outcome = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"repo:" + ghRepo.full_name}))`;
+
+      // Match by GitHub id, or by name for a repository first added by hand
+      // (names are unique, so creating a second row would fail).
+      const existing = await tx.repository.findFirst({
+        where: { OR: [{ githubRepoId: ghRepo.id }, { fullName: ghRepo.full_name }] },
+        select: { id: true },
+      });
+      const repo = existing
+        ? await tx.repository.update({ where: { id: existing.id }, data: details })
+        : await tx.repository.create({
+            data: { ...details, fullName: ghRepo.full_name, owner: ghRepo.owner.login, name: ghRepo.name },
+          });
+
+      const alreadyScanned = await tx.scan.findFirst({ where: { repositoryId: repo.id }, select: { id: true } });
+      if (alreadyScanned) return { created: !existing, queued: false };
+
+      const scan = await tx.scan.create({
+        data: { repositoryId: repo.id, trigger: "INITIAL", status: "QUEUED", commitSha, ref },
+      });
+      // Queued in the same transaction, so a scan row never exists without its job.
+      await tx.job.create({
+        data: {
+          type: "INITIAL_SCAN",
+          status: "QUEUED",
+          payload: {
+            scanId: scan.id,
+            repositoryId: repo.id,
+            installationId,
+            owner: ghRepo.owner.login,
+            repo: ghRepo.name,
+            ref,
+            commitSha,
+          },
+        },
+      });
+      return { created: !existing, queued: true };
     });
-    await enqueueJob("INITIAL_SCAN", {
-      scanId: scan.id,
-      repositoryId: repo.id,
-      installationId,
-      owner: ghRepo.owner.login,
-      repo: ghRepo.name,
-      ref,
-      commitSha,
-    });
-    scansStarted += 1;
+
+    if (outcome.created) added += 1;
+    if (outcome.queued) scansStarted += 1;
   }
 
   return { accountLogin: account?.login ?? "unknown", repositories: repoList.length, added, scansStarted };

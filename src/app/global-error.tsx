@@ -16,7 +16,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
     <html lang="en">
       <body style={{ margin: 0, background: "#f6f4ef", color: "#1d1f23", fontFamily: "Inter, system-ui, sans-serif" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", gap: 16, textAlign: "center", padding: 24 }}>
-          <p style={{ fontSize: 18, fontWeight: 600 }}>ECDAT Atlas couldn&apos;t load</p>
+          <p style={{ fontSize: 18, fontWeight: 600 }}>Vajra couldn&apos;t load</p>
           <p style={{ fontSize: 14, color: "#676b72", maxWidth: 480 }}>{error.message || "Something went wrong while starting. Nothing was changed; try again."}</p>
           <button
             onClick={reset}

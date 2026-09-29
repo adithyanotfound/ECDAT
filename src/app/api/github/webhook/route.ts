@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
 import { verifyWebhookSignature } from "@/server/github/webhook";
 import { enqueueJob } from "@/server/jobs/queue";
+import { syncInstallation } from "@/server/github/sync";
 import { isRateLimited } from "@/server/security/rateLimit";
 import { runJobsSoon } from "@/server/jobs/kick";
 
@@ -168,61 +169,9 @@ async function handleInstallation(payload: {
       data: { scanEnabled: true },
     });
   } else if (action === "created") {
-    const { account } = installation;
-    const inst = await prisma.installation.upsert({
-      where: { githubInstallationId },
-      create: {
-        githubInstallationId,
-        accountLogin: account?.login ?? "unknown",
-        accountType: account?.type ?? "User",
-        avatarUrl: account?.avatar_url ?? null,
-      },
-      update: {
-        accountLogin: account?.login ?? "unknown",
-        avatarUrl: account?.avatar_url ?? null,
-        suspendedAt: null,
-      },
-    });
-
-    if (payload.repositories) {
-      for (const ghRepo of payload.repositories) {
-        const [owner] = ghRepo.full_name.split("/");
-        const repo = await prisma.repository.upsert({
-          where: { githubRepoId: ghRepo.id },
-          create: {
-            installationId: inst.id,
-            githubRepoId: ghRepo.id,
-            fullName: ghRepo.full_name,
-            owner,
-            name: ghRepo.name,
-            defaultBranch: "main",
-            isPrivate: ghRepo.private,
-            scanEnabled: true,
-          },
-          update: { scanEnabled: true },
-        });
-
-        const scan = await prisma.scan.create({
-          data: {
-            repositoryId: repo.id,
-            trigger: "INITIAL",
-            status: "QUEUED",
-            commitSha: "unknown",
-            ref: "refs/heads/main",
-          },
-        });
-
-        await enqueueJob("INITIAL_SCAN", {
-          scanId: scan.id,
-          repositoryId: repo.id,
-          installationId: githubInstallationId,
-          owner,
-          repo: ghRepo.name,
-          ref: "refs/heads/main",
-          commitSha: "unknown",
-        });
-      }
-    }
+    // Same import as the post-install redirect and the Sync button: real default
+    // branches, no duplicate first scans, even when both arrive at once.
+    await syncInstallation(githubInstallationId);
   }
 }
 
@@ -235,50 +184,10 @@ async function handleInstallationRepositories(payload: {
   const { action, installation, repositories_added, repositories_removed } = payload;
   const githubInstallationId = installation.id;
 
-  const inst = await prisma.installation.findUnique({
-    where: { githubInstallationId },
-    select: { id: true },
-  });
-  if (!inst) return;
-
-  if (action === "added" && repositories_added) {
-    for (const ghRepo of repositories_added) {
-      const [owner] = ghRepo.full_name.split("/");
-      const repo = await prisma.repository.upsert({
-        where: { githubRepoId: ghRepo.id },
-        create: {
-          installationId: inst.id,
-          githubRepoId: ghRepo.id,
-          fullName: ghRepo.full_name,
-          owner,
-          name: ghRepo.name,
-          defaultBranch: "main",
-          isPrivate: ghRepo.private,
-          scanEnabled: true,
-        },
-        update: { scanEnabled: true },
-      });
-
-      const scan = await prisma.scan.create({
-        data: {
-          repositoryId: repo.id,
-          trigger: "INITIAL",
-          status: "QUEUED",
-          commitSha: "unknown",
-          ref: "refs/heads/main",
-        },
-      });
-
-      await enqueueJob("INITIAL_SCAN", {
-        scanId: scan.id,
-        repositoryId: repo.id,
-        installationId: githubInstallationId,
-        owner,
-        repo: ghRepo.name,
-        ref: "refs/heads/main",
-        commitSha: "unknown",
-      });
-    }
+  // No early return when the installation isn't recorded yet (a missed setup
+  // redirect): the sync records it.
+  if (action === "added" && repositories_added?.length) {
+    await syncInstallation(githubInstallationId);
   }
 
   if (action === "removed" && repositories_removed) {
