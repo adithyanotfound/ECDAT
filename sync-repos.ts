@@ -18,7 +18,11 @@ async function main() {
     return;
   }
   
-  const payload = deliveries[0].payload as any;
+  // The stored "installation" webhook body; only the fields used below.
+  const payload = deliveries[0].payload as {
+    installation: { id: number; account: { login: string; type: string; avatar_url: string } };
+    repositories?: { id: number; full_name: string; private: boolean }[];
+  };
   const installationId = payload.installation.id;
   
   console.log(`Syncing installation ${installationId}...`);

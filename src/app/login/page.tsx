@@ -1,120 +1,173 @@
-"use client";
+/**
+ * Sign-in, with GitHub only. A charcoal panel says what the product does; the
+ * right side has the GitHub button. If the server has no GitHub App
+ * configured, the page says so instead of sending people to an error.
+ */
+import type { Metadata } from "next";
+import Link from "next/link";
+import { AlertTriangle, ArrowLeft, FileSearch, ShieldCheck, Timer } from "lucide-react";
+import { BrandMark, BrandName } from "@/components/shell/BrandMark";
+import { GithubIcon } from "@/components/ui/icons";
+import { LatticeField } from "@/components/effects/LatticeField";
 
-import { useEffect, useState } from "react";
-import { Shield, ChevronRight, Activity, Code2, Database } from "lucide-react";
-import { useRouter } from "next/navigation";
+export const metadata: Metadata = { title: "Sign in" };
 
-export default function LandingPage() {
-  const router = useRouter();
-  const [mounted, setMounted] = useState(false);
+// Reads server settings on each request, so it isn't pre-rendered at build time.
+export const dynamic = "force-dynamic";
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+const POINTS = [
+  {
+    icon: <FileSearch size={18} />,
+    title: "Finds every algorithm, key and certificate",
+    body: "In code, dependencies, config files and AWS.",
+  },
+  {
+    icon: <Timer size={18} />,
+    title: "Shows what quantum computers will break",
+    body: "And how much time you have to move.",
+  },
+  {
+    icon: <ShieldCheck size={18} />,
+    title: "Tells you what to replace it with",
+    body: "Mapped to the NIST post-quantum standards.",
+  },
+];
+
+// Messages for the ?error= values the GitHub callback redirects back with.
+const GITHUB_ERRORS: Record<string, string> = {
+  invalid_state: "The sign-in link expired or was opened in another tab. Try again.",
+  token_exchange: "GitHub didn't accept the sign-in. Check the GitHub App's client secret on the server.",
+  server_error: "Something went wrong while signing in with GitHub. Try again.",
+};
+
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
+  const githubEnabled = Boolean(process.env.GITHUB_CLIENT_ID);
+  const message = error ? (GITHUB_ERRORS[error] ?? "Sign-in didn't work. Try again.") : null;
 
   return (
-    <div className="min-h-screen bg-[#0A0A0B] text-white overflow-hidden relative selection:bg-blue-500/30">
-      {/* Dynamic Background */}
-      <div className="absolute inset-0 z-0 opacity-40">
-        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/20 blur-[120px] animate-pulse" style={{ animationDuration: '4s' }} />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-purple-600/20 blur-[150px] animate-pulse" style={{ animationDuration: '7s', animationDelay: '1s' }} />
-        <div className="absolute top-[40%] left-[60%] w-[30%] h-[30%] rounded-full bg-emerald-500/10 blur-[100px] animate-pulse" style={{ animationDuration: '5s', animationDelay: '2s' }} />
-      </div>
+    <div className="grid h-dvh overflow-y-auto bg-bg lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+      {/* Brand panel */}
+      <aside className="relative hidden overflow-hidden bg-charcoal p-12 text-white lg:flex lg:flex-col">
+        <LatticeField
+          tone="dark"
+          spacing={56}
+          packets={6}
+          className="[mask-image:radial-gradient(ellipse_90%_80%_at_70%_30%,black_10%,transparent_80%)]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-40 -bottom-40 size-[560px] rounded-full bg-[radial-gradient(closest-side,rgb(217_174_74/0.22),transparent)]"
+        />
+        <svg
+          aria-hidden="true"
+          className="animate-orbit pointer-events-none absolute -top-24 -right-24 size-[460px] text-gold-bright opacity-20"
+          viewBox="0 0 200 200"
+          fill="none"
+        >
+          {[40, 60, 80, 98].map((r, i) => (
+            <circle
+              key={r}
+              cx="100"
+              cy="100"
+              r={r}
+              stroke="currentColor"
+              strokeWidth="0.8"
+              strokeDasharray={i % 2 ? "3 5" : undefined}
+            />
+          ))}
+          <ellipse cx="100" cy="100" rx="36" ry="98" stroke="currentColor" strokeWidth="0.8" />
+        </svg>
 
-      {/* Grid Overlay */}
-      <div 
-        className="absolute inset-0 z-0 opacity-[0.03]"
-        style={{
-          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.5) 1px, transparent 1px)',
-          backgroundSize: '40px 40px'
-        }}
-      />
+        <Link href="/" className="relative flex items-center gap-2.5">
+          <BrandMark size={34} onDark />
+          <BrandName onDark />
+        </Link>
 
-      {/* Navbar */}
-      <nav className="relative z-10 flex items-center justify-between px-8 py-6 max-w-7xl mx-auto">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Shield size={20} className="text-white" />
-          </div>
-          <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
-            ECDAT Atlas
-          </span>
+        <div className="relative my-auto max-w-md py-16">
+          <p className="text-xs font-semibold tracking-[0.14em] text-gold-bright uppercase">Post-quantum readiness</p>
+          <h1 className="mt-3 text-4xl leading-[1.1] font-semibold tracking-tight">
+            Know which cryptography won&apos;t survive a quantum computer.
+          </h1>
+          <ul className="mt-10 space-y-6">
+            {POINTS.map((p) => (
+              <li key={p.title} className="flex gap-4">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-gold-bright">
+                  {p.icon}
+                </span>
+                <span>
+                  <span className="block text-[15px] font-medium">{p.title}</span>
+                  <span className="block text-[14px] text-on-dark-muted">{p.body}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <div className="flex items-center gap-6 text-sm font-medium text-white/60">
-          <span className="hover:text-white transition-colors cursor-pointer">Platform</span>
-          <span className="hover:text-white transition-colors cursor-pointer">Security</span>
-          <span className="hover:text-white transition-colors cursor-pointer">Enterprise</span>
-          <a
-            href="/api/github/login"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all backdrop-blur-md border border-white/10 hover:border-white/20"
+
+        <p className="relative text-[13px] text-white/40">CycloneDX 1.6 CBOM · FIPS 203 and 204 recommendations</p>
+      </aside>
+
+      {/* Form */}
+      <main className="flex min-h-full flex-col px-6 py-8 sm:px-10">
+        <div className="flex items-center justify-between">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-[13.5px] font-medium text-muted hover:text-ink"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.2c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
-            Sign In
-          </a>
-        </div>
-      </nav>
-
-      {/* Hero Section */}
-      <main className="relative z-10 flex flex-col items-center justify-center px-4 pt-20 pb-32 text-center max-w-5xl mx-auto min-h-[80vh]">
-        
-        {/* Badge */}
-        <div className={`mb-8 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-xs font-semibold uppercase tracking-widest transition-all duration-1000 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-          </span>
-          Next-Gen Cryptographic Intelligence
+            <ArrowLeft size={15} /> Back to the website
+          </Link>
+          <Link href="/" className="flex items-center gap-2 lg:hidden">
+            <BrandMark size={28} />
+            <BrandName />
+          </Link>
         </div>
 
-        {/* Headline */}
-        <h1 className={`text-6xl md:text-8xl font-extrabold tracking-tighter mb-8 leading-[1.1] transition-all duration-1000 delay-100 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
-          Discover, analyze, and <br/>
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-emerald-400">
-            secure your crypto.
-          </span>
-        </h1>
+        <div className="mx-auto my-auto w-full max-w-[400px] py-12">
+          <h2 className="text-[28px] font-semibold tracking-tight text-ink">Sign in</h2>
+          <p className="mt-1.5 text-[15px] text-muted">
+            Use your GitHub account. You&apos;ll see the repositories you&apos;ve connected.
+          </p>
 
-        {/* Subtitle */}
-        <p className={`text-lg md:text-xl text-white/50 max-w-2xl mb-12 font-medium leading-relaxed transition-all duration-1000 delay-200 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
-          ECDAT Atlas automatically detects legacy algorithms, vulnerable certificates, and non-quantum-safe cryptography across your entire codebase with zero configuration.
+          {message && (
+            <p
+              role="alert"
+              className="mt-6 flex gap-2.5 rounded-xl bg-critical-tint px-4 py-3 text-[13.5px] text-critical-ink"
+            >
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              {message}
+            </p>
+          )}
+
+          <div className="mt-8">
+            {githubEnabled ? (
+              <a
+                href="/api/github/login"
+                className="inline-flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-charcoal text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-charcoal-2"
+              >
+                <GithubIcon size={19} /> Continue with GitHub
+              </a>
+            ) : (
+              <div className="rounded-2xl border border-moderate/40 bg-moderate-tint p-5 text-[13.5px] leading-relaxed text-moderate-ink">
+                <p className="flex items-center gap-2 font-semibold">
+                  <AlertTriangle size={16} /> GitHub sign-in isn&apos;t set up on this server
+                </p>
+                <p className="mt-1.5">
+                  An administrator needs to register a GitHub App and set{" "}
+                  <code className="font-mono">GITHUB_CLIENT_ID</code>,{" "}
+                  <code className="font-mono">GITHUB_CLIENT_SECRET</code> and the other GitHub values, then restart the
+                  server. RUNBOOK.md, section 3, has the steps.
+                </p>
+              </div>
+            )}
+            <p className="mt-4 text-center text-xs text-muted">
+              ECDAT Atlas only asks GitHub for your public profile and email address.
+            </p>
+          </div>
+        </div>
+
+        <p className="text-center text-xs text-faint">
+          Access is logged. Only sign in if you&apos;ve been given an account.
         </p>
-
-        {/* CTA */}
-        <div className={`flex flex-col sm:flex-row items-center gap-4 transition-all duration-1000 delay-300 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
-          <a
-            href="/api/github/login"
-            className="group relative flex items-center gap-3 px-8 py-4 bg-white text-black rounded-full font-bold text-lg hover:bg-gray-100 transition-all active:scale-95 overflow-hidden"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.2c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
-            <span>Get Started</span>
-            <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
-          </a>
-        </div>
-
-        {/* Features Preview */}
-        <div className={`mt-24 grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl transition-all duration-1000 delay-500 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
-          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/[0.02] border border-white/5 backdrop-blur-sm">
-            <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center mb-4 text-blue-400">
-              <Code2 size={24} />
-            </div>
-            <h3 className="font-semibold mb-2">Automated Scanning</h3>
-            <p className="text-sm text-white/50">Push to GitHub and let our engine instantly map your entire cryptographic inventory.</p>
-          </div>
-          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/[0.02] border border-white/5 backdrop-blur-sm">
-            <div className="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center mb-4 text-purple-400">
-              <Activity size={24} />
-            </div>
-            <h3 className="font-semibold mb-2">PQC Readiness</h3>
-            <p className="text-sm text-white/50">Identify quantum-vulnerable algorithms and calculate your Post-Quantum Safety Margin.</p>
-          </div>
-          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/[0.02] border border-white/5 backdrop-blur-sm">
-            <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4 text-emerald-400">
-              <Database size={24} />
-            </div>
-            <h3 className="font-semibold mb-2">CBOM Export</h3>
-            <p className="text-sm text-white/50">Generate compliant CycloneDX 1.6 Cryptography Bill of Materials (CBOM) instantly.</p>
-          </div>
-        </div>
       </main>
     </div>
   );

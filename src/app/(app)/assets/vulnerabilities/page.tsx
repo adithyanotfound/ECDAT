@@ -1,218 +1,349 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import type { Finding } from "@/fixtures/types";
-import { SeverityPill } from "@/components/ui/Pill";
+/**
+ * Vulnerabilities: specific problems to fix. Counts first, then the list
+ * filtered by severity and status, then a drawer per finding with what it
+ * means and where it is. /assets/vulnerabilities?repositoryId=… narrows to
+ * one repository (linked from that repository's page).
+ */
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { AlertOctagon, AlertTriangle, ChevronRight, CircleDot, Download, FolderGit2, X } from "lucide-react";
+import type { Finding, Severity } from "@/fixtures/types";
+import { PageHeader } from "@/components/ui/Card";
+import { buttonClass } from "@/components/ui/Button";
+import { FilterChips, Pagination, SearchInput } from "@/components/ui/Controls";
+import { Badge, SeverityPill } from "@/components/ui/Pill";
+import { EmptyState, Notice, SkeletonRows } from "@/components/ui/States";
 import { StatCard } from "@/components/ui/StatCard";
-import { formatRelativeTime } from "@/lib/format";
-import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Drawer } from "@/components/ui/Drawer";
+import { InfoHint } from "@/components/ui/InfoHint";
+import { formatDate, formatRelativeTime } from "@/lib/format";
+import { SEVERITY_TONE, type Tone } from "@/lib/tones";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
+const SEVERITIES: Severity[] = ["Critical", "High", "Moderate", "Low"];
+const STATUS_TONE: Record<Finding["status"], Tone> = { Open: "critical", Mitigated: "safe", Accepted: "neutral" };
+const STATUS_TEXT: Record<Finding["status"], string> = {
+  Open: "Still present in the latest scan.",
+  Mitigated: "No longer found: it was fixed or removed.",
+  Accepted: "Someone decided to live with this risk.",
+};
+const URGENCY: Record<Severity, string> = {
+  Critical: "Fix this as soon as possible; it's exploitable or already broken.",
+  High: "Fix this soon; it weakens your security today or once quantum computers arrive.",
+  Moderate: "Plan a fix with your next round of upgrades.",
+  Low: "Worth knowing about; fix it when you're working nearby.",
+  Compliant: "Nothing to fix.",
+};
 
 export default function VulnerabilitiesPage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [total, setTotal] = useState(0);
-  const [openCount, setOpenCount] = useState(0);
-  const [criticalCount, setCriticalCount] = useState(0);
-  const [highCount, setHighCount] = useState(0);
+  const [counts, setCounts] = useState({ open: 0, critical: 0, high: 0 });
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [severity, setSeverity] = useState<Severity | "">("");
+  const [status, setStatus] = useState<Finding["status"] | "">("Open");
+  const [repositoryId, setRepositoryId] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Finding | null>(null);
 
-  const fetchPage = useCallback(async (p: number, q: string) => {
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- reading the URL once on mount */
+    const p = new URLSearchParams(window.location.search);
+    setRepositoryId(p.get("repositoryId"));
+    if (p.get("search")) setSearch(p.get("search") ?? "");
+    setReady(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebounced(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const fetchPage = useCallback(async () => {
+    if (!ready) return;
     setLoading(true);
     try {
       const url = new URL("/api/findings", window.location.origin);
-      url.searchParams.set("page", String(p));
+      url.searchParams.set("page", String(page));
       url.searchParams.set("pageSize", String(PAGE_SIZE));
-      if (q) url.searchParams.set("search", q);
-      const res = await fetch(url.toString());
-      const data = await res.json();
+      if (debounced) url.searchParams.set("search", debounced);
+      if (severity) url.searchParams.set("severity", severity);
+      if (status) url.searchParams.set("status", status);
+      if (repositoryId) url.searchParams.set("repositoryId", repositoryId);
+      const data = await (await fetch(url.toString())).json();
       setFindings(data.items ?? []);
       setTotal(data.total ?? 0);
-      setOpenCount(data.openCount ?? 0);
-      setCriticalCount(data.criticalCount ?? 0);
-      setHighCount(data.highCount ?? 0);
+      setCounts({ open: data.openCount ?? 0, critical: data.criticalCount ?? 0, high: data.highCount ?? 0 });
+    } catch {
+      setFindings([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ready, page, debounced, severity, status, repositoryId]);
 
-  useEffect(() => { fetchPage(page, search); }, [page, fetchPage]);
   useEffect(() => {
-    const id = setTimeout(() => { setPage(1); fetchPage(1, search); }, 300);
-    return () => clearTimeout(id);
-  }, [search, fetchPage]);
+    fetchPage();
+  }, [fetchPage]);
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-
-  const thStyle: React.CSSProperties = {
-    textAlign: "left",
-    padding: "10px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    color: "var(--color-ink-muted)",
-    backgroundColor: "var(--color-thead)",
-    borderBottom: "1px solid var(--color-border)",
-    whiteSpace: "nowrap",
-  };
-  const tdStyle: React.CSSProperties = {
-    padding: "10px 14px",
-    fontSize: "13px",
-    borderBottom: "1px solid var(--color-border)",
-    verticalAlign: "middle",
-  };
+  const repoName = repositoryId ? (findings[0]?.repositoryFullName ?? "one repository") : null;
+  const exportHref = `/api/findings/export${repositoryId ? `?repositoryId=${encodeURIComponent(repositoryId)}` : ""}`;
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
-      {/* KPI tiles */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-        <StatCard
-          title="Open Vulnerabilities"
-          value={loading ? "—" : openCount}
-          subtitle="Currently open security findings"
-          accentColor="var(--color-critical)"
-          tooltip="Total number of security findings that have not yet been resolved."
-        />
-        <StatCard
-          title="Critical Findings"
-          value={loading ? "—" : criticalCount}
-          subtitle="Highest severity issues"
-          accentColor="var(--color-high)"
-          tooltip="Issues rated Critical — must be fixed immediately."
-        />
-        <StatCard
-          title="High Severity"
-          value={loading ? "—" : highCount}
-          subtitle="High severity issues"
-          accentColor="var(--color-moderate)"
-          tooltip="Issues rated High — should be addressed in the next sprint."
-        />
-      </div>
-
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--color-ink)" }}>Vulnerabilities</h1>
-          <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-muted)" }}>{total} findings across all repositories</p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              width: "240px",
-            }}
-          >
-            <Search size={14} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
-            <input
-              type="text"
-              placeholder="Search vulnerabilities..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--color-ink)" }}
-            />
-          </div>
-          <a
-            href="/api/findings/export"
-            className="px-4 py-2 rounded-lg text-sm font-medium"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-            }}
-          >
-            Export CSV
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Understand & fix"
+        title="Vulnerabilities"
+        description="Specific problems found in your code and cloud: weak algorithms, expiring certificates, keys left in files. Each one points to where it was found."
+        actions={
+          <a href={exportHref} className={buttonClass("secondary")}>
+            <Download size={16} /> Export CSV
           </a>
+        }
+      />
+
+      {repositoryId && (
+        <Notice
+          tone="gold"
+          action={
+            <Link
+              href="/assets/vulnerabilities"
+              onClick={() => setRepositoryId(null)}
+              className="inline-flex items-center gap-1 font-semibold hover:underline"
+            >
+              <X size={14} /> Show all
+            </Link>
+          }
+        >
+          Showing only <b>{repoName}</b>.
+        </Notice>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-3">
+        <StatCard
+          title="Open problems"
+          value={counts.open}
+          subtitle="Still present in the latest scans"
+          term="finding"
+          tone="gold"
+          icon={<CircleDot size={16} />}
+        />
+        <StatCard
+          title="Critical"
+          value={counts.critical}
+          subtitle="Fix as soon as possible"
+          term="severity"
+          tone="critical"
+          icon={<AlertOctagon size={16} />}
+        />
+        <StatCard
+          title="High"
+          value={counts.high}
+          subtitle="Fix soon"
+          term="severity"
+          tone="high"
+          icon={<AlertTriangle size={16} />}
+        />
+      </section>
+
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-2.5">
+          <FilterChips
+            label="Severity"
+            value={severity}
+            onChange={(v) => {
+              setSeverity(v);
+              setPage(1);
+            }}
+            allLabel="Any severity"
+            options={SEVERITIES.map((s) => ({ value: s, label: s, tone: SEVERITY_TONE[s] }))}
+          />
+          <FilterChips
+            label="Status"
+            value={status}
+            onChange={(v) => {
+              setStatus(v);
+              setPage(1);
+            }}
+            allLabel="Any status"
+            options={[
+              { value: "Open", label: "Open", tone: "critical" },
+              { value: "Mitigated", label: "Fixed", tone: "safe" },
+              { value: "Accepted", label: "Accepted", tone: "neutral" },
+            ]}
+          />
         </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="Search title, rule or detail" />
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-        <table className="w-full">
-          <thead>
-            <tr>
-              {["ID", "Severity", "Title", "Detail", "Component", "Repository", "Status", "Last Seen"].map((h) => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading
-              ? Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <tr key={i}>
-                    {Array.from({ length: 8 }).map((_, j) => (
-                      <td key={j} style={tdStyle}>
-                        <div className="rounded animate-pulse" style={{ height: "14px", width: j === 2 ? "160px" : "70px", backgroundColor: "var(--color-surface-2)" }} />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              : findings.map((f) => (
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line bg-surface-2/70 text-left text-[12.5px] text-muted">
+                <th scope="col" className="px-4 py-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    Severity <InfoHint label="Severity" term="severity" />
+                  </span>
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Problem
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Repository
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Last seen
+                </th>
+                <th scope="col" className="w-8 px-4 py-3">
+                  <span className="sr-only">Open</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows rows={8} cols={6} />
+              ) : findings.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>
+                    <EmptyState
+                      icon={<AlertTriangle size={22} />}
+                      title={severity || status || debounced ? "Nothing matches" : "No problems found"}
+                    >
+                      {severity || status || debounced
+                        ? "Try another filter. Fixed problems are under Status → Fixed."
+                        : "Either nothing has been scanned yet, or the scans came back clean."}
+                    </EmptyState>
+                  </td>
+                </tr>
+              ) : (
+                findings.map((f) => (
                   <tr
                     key={f.id}
-                    style={{ backgroundColor: "var(--color-surface)", transition: "background-color 0.1s" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface-2)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface)")}
+                    tabIndex={0}
+                    onClick={() => setSelected(f)}
+                    onKeyDown={(e) => e.key === "Enter" && setSelected(f)}
+                    aria-label={`Open ${f.title}`}
+                    className="cursor-pointer border-b border-line transition-colors last:border-0 hover:bg-surface-2/60 focus-visible:bg-surface-2/60"
                   >
-                    <td style={tdStyle}>
-                      <span className="font-mono text-xs" style={{ color: "var(--color-ink)" }}>{f.code}</span>
+                    <td className="px-4 py-3.5">
+                      <SeverityPill severity={f.severity} />
                     </td>
-                    <td style={tdStyle}><SeverityPill severity={f.severity} /></td>
-                    <td style={tdStyle}>
-                      <span style={{ color: "var(--color-ink)" }}>{f.title}</span>
+                    <td className="max-w-[440px] px-4 py-3.5">
+                      <p className="font-medium text-ink">{f.title}</p>
+                      <p className="truncate text-xs text-muted" title={f.detail}>
+                        {f.affectedComponent !== "Unknown" ? `${f.affectedComponent} · ` : ""}
+                        {f.detail}
+                      </p>
                     </td>
-                    <td style={{ ...tdStyle, maxWidth: "260px" }}>
-                      <span className="text-xs truncate block w-full" style={{ color: "var(--color-ink-muted)" }} title={f.detail}>{f.detail}</span>
+                    <td className="max-w-[220px] px-4 py-3.5">
+                      <span className="block truncate text-[13px] text-ink-2">{f.repositoryFullName}</span>
                     </td>
-                    <td style={{ ...tdStyle, maxWidth: "180px" }}>
-                      <span className="truncate block w-full" style={{ color: "var(--color-ink-muted)" }} title={f.affectedComponent}>{f.affectedComponent}</span>
+                    <td className="px-4 py-3.5">
+                      <Badge tone={STATUS_TONE[f.status]}>{f.status === "Mitigated" ? "Fixed" : f.status}</Badge>
                     </td>
-                    <td style={{ ...tdStyle, maxWidth: "180px" }}>
-                      <span className="text-xs truncate block w-full" style={{ color: "var(--color-accent)" }} title={f.repositoryFullName}>{f.repositoryFullName}</span>
+                    <td className="px-4 py-3.5 text-[13px] whitespace-nowrap text-muted">
+                      {formatRelativeTime(f.lastSeenAt)}
                     </td>
-                    <td style={tdStyle}>
-                      {(() => {
-                        const c = f.status === "Open" ? "#F0516B" : f.status === "Mitigated" ? "#3FCF8E" : "#5AA9F5";
-                        return (
-                          <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: c, backgroundColor: `${c}22`, border: `1px solid ${c}44` }}>
-                            {f.status}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-                        {formatRelativeTime(f.lastSeenAt)}
-                      </span>
+                    <td className="px-4 py-3.5 text-faint">
+                      <ChevronRight size={16} />
                     </td>
                   </tr>
-                ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-          Showing {Math.min((page - 1) * PAGE_SIZE + 1, total)}–{Math.min(page * PAGE_SIZE, total)} of {total}
-        </p>
-        <div className="flex items-center gap-2">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
-            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}>
-            <ChevronLeft size={14} /> Prev
-          </button>
-          <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{page} / {totalPages || 1}</span>
-          <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
-            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}>
-            Next <ChevronRight size={14} />
-          </button>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
+
+      <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} noun="problems" />
+
+      <Drawer
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        title={selected?.title ?? ""}
+        eyebrow={
+          selected && (
+            <>
+              <SeverityPill severity={selected.severity} />
+              <Badge tone={STATUS_TONE[selected.status]}>
+                {selected.status === "Mitigated" ? "Fixed" : selected.status}
+              </Badge>
+              <Badge dot={false} className="font-mono">
+                {selected.code}
+              </Badge>
+            </>
+          )
+        }
+        subtitle={selected?.repositoryFullName}
+        footer={
+          selected && (
+            <Link
+              href={`/scanning/repositories/${selected.repositoryId}`}
+              className={buttonClass("primary", "md", "w-full")}
+            >
+              <FolderGit2 size={16} /> Open this repository
+            </Link>
+          )
+        }
+      >
+        {selected && (
+          <div className="flex flex-col gap-5 p-6">
+            <div className="rounded-xl bg-surface-2/70 p-4">
+              <p className="text-xs font-semibold tracking-[0.12em] text-gold-ink uppercase">How urgent</p>
+              <p className="mt-1.5 text-[15px] leading-relaxed text-ink">{URGENCY[selected.severity]}</p>
+            </div>
+            <section>
+              <h3 className="text-[14px] font-semibold text-ink">What we found</h3>
+              <p className="mt-1 text-[13.5px] leading-relaxed whitespace-pre-line text-ink-2">{selected.detail}</p>
+            </section>
+            <dl className="divide-y divide-line rounded-xl border border-line text-[13.5px]">
+              {[
+                [
+                  "Where",
+                  selected.filePath ? (
+                    <span className="font-mono text-[12.5px] break-all">{selected.filePath}</span>
+                  ) : (
+                    "–"
+                  ),
+                ],
+                ["Affects", selected.affectedComponent],
+                ["Status", STATUS_TEXT[selected.status]],
+                ["First seen", formatDate(selected.firstSeenAt, "d MMM yyyy")],
+                ["Last seen", formatDate(selected.lastSeenAt, "d MMM yyyy, HH:mm")],
+                [
+                  "Rule",
+                  <span key="r" className="font-mono text-[12.5px]">
+                    {selected.code}
+                  </span>,
+                ],
+              ].map(([k, v]) => (
+                <div key={k as string} className="grid grid-cols-[110px_1fr] gap-4 px-4 py-2.5">
+                  <dt className="text-muted">{k}</dt>
+                  <dd className="min-w-0 text-ink">{v}</dd>
+                </div>
+              ))}
+            </dl>
+            <Link
+              href={`/assets/recommendations?repositoryId=${encodeURIComponent(selected.repositoryId)}`}
+              className="text-[13.5px] font-medium text-gold-ink hover:underline"
+            >
+              See the recommended replacements for this repository →
+            </Link>
+          </div>
+        )}
+      </Drawer>
     </div>
   );
 }

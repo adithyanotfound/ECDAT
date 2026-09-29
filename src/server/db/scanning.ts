@@ -2,7 +2,7 @@
  * Data-access layer for scanning screens (Repositories, Profiles, Scans).
  */
 import { prisma } from "./client";
-import type { Repository, Scan, ScanProfile, ScanStatus, Trigger } from "@/fixtures/types";
+import type { Repository, Scan, ScanStatus, Trigger } from "@/fixtures/types";
 import { requireSession } from "@/server/auth/session";
 
 // ─── Repositories ─────────────────────────────────────────────────────────────
@@ -57,17 +57,21 @@ export async function getRepositories(): Promise<Repository[]> {
       criticality: mapCriticality(r.criticality),
       lastScanAt: lastScan?.startedAt.toISOString() ?? null,
       lastScanStatus: lastScan ? mapScanStatus(lastScan.status) : null,
+      sourceType: r.sourceType === "AWS" ? "AWS" : "GITHUB",
     };
   });
 }
 
 // ─── Scans ────────────────────────────────────────────────────────────────────
 
+const SCAN_STATUSES = ["QUEUED", "RUNNING", "COMPLETED", "FAILED"] as const;
+
 export interface ScansPageParams {
   page?: number;
   pageSize?: number;
   status?: string;
   repositoryId?: string;
+  search?: string;
 }
 
 export interface ScansPage {
@@ -80,11 +84,16 @@ export async function getScansPage({
   pageSize = 10,
   status,
   repositoryId,
+  search,
 }: ScansPageParams = {}): Promise<ScansPage> {
   const session = await requireSession();
+  const statusFilter = SCAN_STATUSES.find((s) => s === status?.toUpperCase());
   const where = {
-    repository: { owner: session.login },
-    ...(status ? { status: status as "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" } : {}),
+    repository: {
+      owner: session.login,
+      ...(search ? { fullName: { contains: search, mode: "insensitive" as const } } : {}),
+    },
+    ...(statusFilter ? { status: statusFilter } : {}),
     ...(repositoryId ? { repositoryId } : {}),
   };
 
@@ -119,25 +128,6 @@ export async function getScansPage({
       profileName: s.profile?.name ?? "Default Full Scan",
     })),
   };
-}
-
-// ─── ScanProfiles ─────────────────────────────────────────────────────────────
-
-export async function getScanProfiles(): Promise<ScanProfile[]> {
-  const profiles = await prisma.scanProfile.findMany({
-    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-  });
-
-  return profiles.map((p) => ({
-    id: p.id,
-    name: p.name,
-    rulePackIds: p.rulePackIds,
-    includeGlobs: p.includeGlobs,
-    excludeGlobs: p.excludeGlobs,
-    maxFileSizeKb: p.maxFileSizeKb,
-    createdAt: p.createdAt.toISOString(),
-    isDefault: p.isDefault,
-  }));
 }
 
 // ─── Scan logs ────────────────────────────────────────────────────────────────

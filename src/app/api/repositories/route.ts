@@ -1,14 +1,17 @@
 /**
- * GET  /api/repositories         — list all repositories
- * POST /api/repositories         — create an AWS data source
+ * GET  /api/repositories         — list the signed-in user's repositories
+ * POST /api/repositories         — add a public GitHub repository or an AWS data source
  *
- * POST body (JSON):
+ * POST body (JSON), GitHub:
+ * { sourceType: "GITHUB"; fullName: "owner/repo"; defaultBranch?: string }
+ *
+ * POST body (JSON), AWS:
  * {
+ *   sourceType?:     "AWS";
  *   accessKeyId:     string;  // AWS Access Key ID
  *   secretAccessKey: string;  // AWS Secret Access Key (encrypted at rest)
  *   region:          string;  // e.g. "us-east-1"
  *   name:            string;  // CodeCommit repo name OR s3://<bucket>/<key>
- *   displayName?:    string;  // optional human label
  *   defaultBranch?:  string;  // default "main"
  * }
  */
@@ -17,41 +20,51 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { getRepositories } from "@/server/db/scanning";
 import { encryptSecret } from "@/server/aws/credentials";
-import { requireSession } from "@/server/auth/session";
+import { isAuthError, sessionOr401, unauthorized } from "@/server/auth/guard";
 import { repositories as fixtureRepos } from "@/fixtures/repositories";
+
+// Branch names: letters, digits and . _ / - (no "..", no leading dash), as git allows in practice.
+const BRANCH = z
+  .string()
+  .max(128)
+  .regex(/^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/, "Use a valid branch name, for example main.");
 
 const AwsRepoSchema = z.object({
   sourceType: z.literal("AWS").optional(),
   accessKeyId: z.string().min(16).max(128),
   secretAccessKey: z.string().min(20).max(512),
-  region: z.string().min(1).max(64),
+  region: z.string().regex(/^[a-z]{2}(-gov)?-[a-z]+-\d$/, "Use an AWS region code, for example us-east-1."),
   name: z.string().min(1).max(512),
-  defaultBranch: z.string().max(128).optional().default("main"),
+  defaultBranch: BRANCH.optional().default("main"),
 });
 
 const GithubRepoSchema = z.object({
   sourceType: z.literal("GITHUB"),
-  fullName: z.string().min(1).max(512), // e.g. "HarshitJain2103/Mock-repo"
-  defaultBranch: z.string().max(128).optional().default("main"),
+  // owner/repo exactly as GitHub allows them
+  fullName: z
+    .string()
+    .trim()
+    .regex(
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/,
+      "Use the owner/name form, for example octocat/hello-world.",
+    ),
+  defaultBranch: BRANCH.optional().default("main"),
 });
 
 export async function GET() {
   try {
     const data = await getRepositories();
     return NextResponse.json(data);
-  } catch {
+  } catch (err) {
+    if (isAuthError(err)) return unauthorized();
+    // Database unreachable: show the sample data so the UI still renders.
     return NextResponse.json(fixtureRepos);
   }
 }
 
 export async function POST(req: NextRequest) {
-  // Authenticate — AWS repos are scoped to the logged-in user just like GitHub repos
-  let session: Awaited<ReturnType<typeof requireSession>>;
-  try {
-    session = await requireSession();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await sessionOr401();
+  if (session instanceof NextResponse) return session;
 
   let body: unknown;
   try {
@@ -60,19 +73,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const bodyObj = body as Record<string, any>;
-  
-  if (bodyObj.sourceType === "GITHUB") {
-    const parsed = GithubRepoSchema.safeParse(bodyObj);
+  const sourceType = (body as { sourceType?: unknown } | null)?.sourceType;
+
+  if (sourceType === "GITHUB") {
+    const parsed = GithubRepoSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Validation failed", issues: parsed.error.issues }, { status: 422 });
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Validation failed", issues: parsed.error.issues },
+        { status: 422 },
+      );
     }
     const { fullName, defaultBranch } = parsed.data;
-    
-    // Check for duplicate
+
+    // Repository names are unique across the whole database. Only reveal the
+    // existing record's id when it belongs to the person asking.
     const existing = await prisma.repository.findUnique({ where: { fullName } });
     if (existing) {
-      return NextResponse.json({ error: `Repository '${fullName}' already exists`, repositoryId: existing.id }, { status: 409 });
+      return NextResponse.json(
+        existing.owner === session.login
+          ? { error: `You've already added ${fullName}.`, repositoryId: existing.id }
+          : { error: `${fullName} is already connected by another account.` },
+        { status: 409 },
+      );
     }
 
     try {
@@ -88,17 +110,17 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(repo, { status: 201 });
     } catch (err) {
-      console.error("[github-repo] create error:", err);
-      return NextResponse.json({ error: "Failed to create GitHub repository" }, { status: 500 });
+      console.error("[github-repo] create error:", err instanceof Error ? err.message : String(err));
+      return NextResponse.json({ error: "Failed to add the repository" }, { status: 500 });
     }
   }
 
-  // AWS Flow
+  // AWS flow
   const parsed = AwsRepoSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", issues: parsed.error.issues },
-      { status: 422 }
+      { error: parsed.error.issues[0]?.message ?? "Validation failed", issues: parsed.error.issues },
+      { status: 422 },
     );
   }
 
@@ -109,25 +131,23 @@ export async function POST(req: NextRequest) {
   try {
     encryptedSecret = encryptSecret(secretAccessKey);
   } catch (err) {
+    console.error("[aws-repo] encryption error:", err instanceof Error ? err.message : String(err));
     return NextResponse.json(
-      {
-        error: "Credential encryption failed. Make sure CREDENTIAL_ENCRYPTION_KEY is set in your environment.",
-        detail: err instanceof Error ? err.message : String(err),
-      },
-      { status: 500 }
+      { error: "The server can't store AWS keys safely yet. Set CREDENTIAL_ENCRYPTION_KEY and restart." },
+      { status: 500 },
     );
   }
 
-  // Build a unique fullName for the AWS source:
-  // Format: aws/<region>/<name>
+  // Build a unique fullName for the AWS source: aws/<region>/<name>
   const fullName = `aws/${region}/${name}`;
 
-  // Check for duplicate
   const existing = await prisma.repository.findUnique({ where: { fullName } });
   if (existing) {
     return NextResponse.json(
-      { error: `AWS data source '${fullName}' already exists`, repositoryId: existing.id },
-      { status: 409 }
+      existing.owner === session.login
+        ? { error: `You've already connected ${fullName}.`, repositoryId: existing.id }
+        : { error: `${fullName} is already connected by another account.` },
+      { status: 409 },
     );
   }
 
@@ -136,7 +156,7 @@ export async function POST(req: NextRequest) {
       data: {
         sourceType: "AWS",
         fullName,
-        // Store owner as the session login so existing owner-scoped DB queries include this repo
+        // Owner is the session login so owner-scoped queries include this source
         owner: session.login,
         name,
         defaultBranch,
@@ -159,10 +179,10 @@ export async function POST(req: NextRequest) {
         defaultBranch: repo.defaultBranch,
         createdAt: repo.createdAt.toISOString(),
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (err) {
-    console.error("[aws-repo] create error:", err);
+    console.error("[aws-repo] create error:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "Failed to create AWS data source" }, { status: 500 });
   }
 }

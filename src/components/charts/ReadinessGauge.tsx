@@ -1,106 +1,95 @@
-"use client";
+/**
+ * Quantum readiness, 0–10, as a half-circle gauge. The arc is split into
+ * the three bands the score is read in (0–3, 4–6, 7–10) so the needle's
+ * position means something even before reading the number. With no score
+ * (nothing scanned yet) it shows an empty track and a dash, never a number.
+ */
+import { TONE, pqcTone } from "@/lib/tones";
 
 interface ReadinessGaugeProps {
-  score: number; // 0–10
+  score: number | null; // 0–10, or null when nothing has been scored
   size?: number;
+  onDark?: boolean;
 }
 
-export function ReadinessGauge({ score, size = 140 }: ReadinessGaugeProps) {
-  // Draw a semi-circle gauge
-  const cx = size / 2;
-  const cy = size * 0.56;
-  const r = size * 0.36;
-  const strokeWidth = size * 0.085;
-
-  // Angle range: 180° to 0° (left to right semi-circle over the top)
-  const startAngle = Math.PI;
-  const totalAngle = Math.PI;
-
-  const clampedScore = Math.max(0, Math.min(10, score));
-  const pct = clampedScore / 10;
-  const angle = startAngle - totalAngle * pct;
-
-  function polarToCartesian(a: number) {
-    return {
-      x: cx + r * Math.cos(a),
-      y: cy - r * Math.sin(a),
-    };
-  }
-
-  function describeArc(sAngle: number, eAngle: number) {
-    const start = polarToCartesian(sAngle);
-    const end = polarToCartesian(eAngle);
-    const largeArc = Math.abs(eAngle - sAngle) > Math.PI ? 1 : 0;
-    // Sweep-flag 1 = clockwise arc over the top in screen coordinates
-    return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
-  }
-
-  // Color ramp
-  const color = clampedScore <= 3 ? "#F0516B" : clampedScore <= 6 ? "#F2C14E" : "#3FCF8E";
-
-  const h = size * 0.76;
+export function ReadinessGauge({ score, size = 220, onDark = false }: ReadinessGaugeProps) {
+  const scored = score !== null && Number.isFinite(score);
+  const s = scored ? Math.max(0, Math.min(10, score)) : 0;
+  const cx = 100;
+  const cy = 100;
+  const r = 80;
+  const at = (v: number) => {
+    const a = Math.PI - (v / 10) * Math.PI;
+    return { x: cx + r * Math.cos(a), y: cy - r * Math.sin(a) };
+  };
+  const arc = (from: number, to: number) => {
+    const a = at(from);
+    const b = at(to);
+    return `M ${a.x} ${a.y} A ${r} ${r} 0 0 1 ${b.x} ${b.y}`;
+  };
+  const tone = TONE[pqcTone(s)];
+  const needle = at(s);
+  const track = onDark ? "rgb(255 255 255 / 0.12)" : "var(--color-sunken)";
 
   return (
-    <svg width={size} height={h} viewBox={`0 0 ${size} ${h}`} className="overflow-visible">
-      {/* Track */}
-      <path
-        d={describeArc(Math.PI, 0)}
-        fill="none"
-        stroke="rgba(255, 255, 255, 0.12)"
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-      />
-      {/* Fill */}
-      {clampedScore > 0 && (
-        <path
-          d={describeArc(Math.PI, angle)}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
+    <svg
+      width={size}
+      height={size * 0.62}
+      viewBox="0 0 200 124"
+      role="img"
+      aria-label={scored ? `Quantum readiness ${s} out of 10` : "Quantum readiness not scored yet"}
+      className="overflow-visible"
+    >
+      {/* Bands: not ready, partly ready, ready */}
+      <path d={arc(0, 3.9)} stroke={track} strokeWidth="14" fill="none" strokeLinecap="round" />
+      <path d={arc(4.1, 6.9)} stroke={track} strokeWidth="14" fill="none" />
+      <path d={arc(7.1, 10)} stroke={track} strokeWidth="14" fill="none" strokeLinecap="round" />
+      {scored && s > 0 && <path d={arc(0, s)} stroke={tone.fill} strokeWidth="14" fill="none" strokeLinecap="round" />}
+      {scored && (
+        <circle
+          cx={needle.x}
+          cy={needle.y}
+          r="9"
+          fill={onDark ? "#1f2126" : "#fdfcf9"}
+          stroke={tone.fill}
+          strokeWidth="4"
         />
       )}
-      {/* Score label */}
       <text
         x={cx}
-        y={cy - 2}
+        y={cy - 8}
         textAnchor="middle"
-        fill={color}
-        fontSize={size * 0.22}
-        fontWeight="700"
-        fontFamily="Inter, sans-serif"
+        fontSize="46"
+        fontWeight="650"
+        fill={onDark ? "#ffffff" : "var(--color-ink)"}
+        style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "-0.03em" }}
       >
-        {clampedScore}
+        {scored ? s : "–"}
       </text>
-      {/* Sub label */}
       <text
         x={cx}
-        y={cy + size * 0.1}
+        y={cy + 16}
         textAnchor="middle"
-        fill="var(--color-ink-faint)"
-        fontSize={size * 0.085}
-        fontFamily="Inter, sans-serif"
+        fontSize="13"
+        fill={onDark ? "rgb(255 255 255 / 0.6)" : "var(--color-muted)"}
       >
-        / 10
+        {scored ? "out of 10" : "not scored"}
       </text>
-      {/* Min/Max labels */}
       <text
         x={cx - r}
-        y={cy + size * 0.14}
+        y={cy + 22}
         textAnchor="middle"
-        fill="var(--color-ink-faint)"
-        fontSize={size * 0.08}
-        fontFamily="Inter, sans-serif"
+        fontSize="11"
+        fill={onDark ? "rgb(255 255 255 / 0.45)" : "var(--color-faint)"}
       >
         0
       </text>
       <text
         x={cx + r}
-        y={cy + size * 0.14}
+        y={cy + 22}
         textAnchor="middle"
-        fill="var(--color-ink-faint)"
-        fontSize={size * 0.08}
-        fontFamily="Inter, sans-serif"
+        fontSize="11"
+        fill={onDark ? "rgb(255 255 255 / 0.45)" : "var(--color-faint)"}
       >
         10
       </text>

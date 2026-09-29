@@ -1,130 +1,140 @@
+/**
+ * Coloured labels. Every pill writes its meaning out in words and uses the
+ * tone system from src/lib/tones.ts, so colour is never the only signal.
+ */
 import { cn } from "@/lib/cn";
+import {
+  EFFORT,
+  MOSCA,
+  SCAN_STATUS,
+  SEVERITY_TONE,
+  TONE,
+  pqcTone,
+  riskBand,
+  toScanStatus,
+  type MoscaVerdict,
+  type SeverityLabel,
+  type Tone,
+} from "@/lib/tones";
 
-type Severity = "Critical" | "High" | "Moderate" | "Low" | "Compliant";
-type ScanStatus = "Completed" | "Running" | "Failed" | "Queued";
+// ─── Badge (the base for every pill) ──────────────────────────────────────────
 
-// ─── Severity Pill ────────────────────────────────────────────────────────────
-
-const severityConfig: Record<Severity, { bg: string; color: string; border: string }> = {
-  Critical: { bg: "#FF2B44", color: "#FFFFFF", border: "#FF2B44" },
-  High:     { bg: "#FF6B00", color: "#FFFFFF", border: "#FF6B00" },
-  Moderate: { bg: "#FFD000", color: "#000000", border: "#FFD000" },
-  Low:      { bg: "#1B72E8", color: "#FFFFFF", border: "#1B72E8" },
-  Compliant:{ bg: "#00D26A", color: "#000000", border: "#00D26A" },
-};
-
-interface SeverityPillProps {
-  severity: Severity;
+interface BadgeProps {
+  tone?: Tone;
+  dot?: boolean;
+  pulse?: boolean;
+  children: React.ReactNode;
   className?: string;
+  title?: string;
 }
 
-export function SeverityPill({ severity, className }: SeverityPillProps) {
-  const cfg = severityConfig[severity];
+export function Badge({ tone = "neutral", dot = true, pulse = false, children, className, title }: BadgeProps) {
+  const t = TONE[tone];
   return (
     <span
-      className={cn("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold", className)}
-      style={{
-        backgroundColor: cfg.bg,
-        color: cfg.color,
-        border: `1px solid ${cfg.border}`,
-      }}
-    >
-      {severity}
-    </span>
-  );
-}
-
-// ─── Status Pill ──────────────────────────────────────────────────────────────
-
-const statusConfig: Record<ScanStatus, { bg: string; color: string; border: string }> = {
-  Completed: { bg: "#00D26A", color: "#000000", border: "#00D26A" },
-  Running:   { bg: "#1B72E8", color: "#FFFFFF", border: "#1B72E8" },
-  Failed:    { bg: "#FF2B44", color: "#FFFFFF", border: "#FF2B44" },
-  Queued:    { bg: "#FFD000", color: "#000000", border: "#FFD000" },
-};
-
-interface StatusPillProps {
-  status: ScanStatus;
-  className?: string;
-}
-
-export function StatusPill({ status, className }: StatusPillProps) {
-  const cfg = statusConfig[status];
-  return (
-    <span
-      className={cn("inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold", className)}
-      style={{
-        backgroundColor: cfg.bg,
-        color: cfg.color,
-        border: `1px solid ${cfg.border}`,
-      }}
-    >
-      {status === "Running" && (
-        <span
-          className="w-1.5 h-1.5 rounded-full animate-pulse"
-          style={{ backgroundColor: cfg.color }}
-        />
+      title={title}
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold",
+        className,
       )}
-      {status}
+      style={{ backgroundColor: t.tint, color: t.ink }}
+    >
+      {dot && (
+        <span className="relative flex size-1.5 shrink-0">
+          {pulse && (
+            <span
+              className="absolute inline-flex size-full animate-ping rounded-full opacity-60"
+              style={{ backgroundColor: t.fill }}
+            />
+          )}
+          <span className="relative inline-flex size-1.5 rounded-full" style={{ backgroundColor: t.fill }} />
+        </span>
+      )}
+      {children}
     </span>
   );
 }
 
-// ─── Score Bar (CRSF) ─────────────────────────────────────────────────────────
+// ─── Severity ─────────────────────────────────────────────────────────────────
 
-function crsfColor(score: number): string {
-  if (score <= 19) return "#3FCF8E";
-  if (score <= 44) return "#5AA9F5";
-  if (score <= 69) return "#F2C14E";
-  return "#F0516B";
-}
-
-interface ScoreBarProps {
-  score: number;
-  max?: number;
-  className?: string;
-}
-
-export function ScoreBar({ score, max = 100, className }: ScoreBarProps) {
-  const pct = Math.min(100, (score / max) * 100);
-  const color = crsfColor(score);
+export function SeverityPill({ severity, className }: { severity: SeverityLabel; className?: string }) {
   return (
-    <div
-      className={cn("flex items-center gap-2", className)}
-      style={{ fontVariantNumeric: "tabular-nums" }}
-    >
-      <div
-        className="rounded-full overflow-hidden flex-1"
-        style={{ height: "6px", backgroundColor: "var(--color-border)", minWidth: "60px" }}
-      >
+    <Badge tone={SEVERITY_TONE[severity] ?? "neutral"} className={className}>
+      {severity}
+    </Badge>
+  );
+}
+
+// ─── Scan status ──────────────────────────────────────────────────────────────
+
+/** Accepts "Completed" or the database's "COMPLETED". */
+export function StatusPill({ status, className }: { status: string; className?: string }) {
+  const s = toScanStatus(status);
+  if (!s) return <Badge className={className}>{status}</Badge>;
+  const cfg = SCAN_STATUS[s];
+  return (
+    <Badge tone={cfg.tone} pulse={s === "Running"} className={className}>
+      {cfg.label}
+    </Badge>
+  );
+}
+
+// ─── Mosca verdict and effort ─────────────────────────────────────────────────
+
+export function VerdictPill({ verdict, className }: { verdict: MoscaVerdict; className?: string }) {
+  const cfg = MOSCA[verdict] ?? MOSCA.PLAN;
+  return (
+    <Badge tone={cfg.tone} className={className} title={cfg.plain}>
+      {cfg.label}
+    </Badge>
+  );
+}
+
+export function EffortPill({ effort, className }: { effort: "HIGH" | "MEDIUM" | "LOW"; className?: string }) {
+  const cfg = EFFORT[effort] ?? EFFORT.MEDIUM;
+  return (
+    <Badge tone={cfg.tone} className={className} title={cfg.plain}>
+      {cfg.label}
+    </Badge>
+  );
+}
+
+export function QuantumSafePill({ safe, className }: { safe: boolean | null; className?: string }) {
+  if (safe === null) return <Badge className={className}>Unknown</Badge>;
+  return (
+    <Badge tone={safe ? "safe" : "critical"} className={className}>
+      {safe ? "Quantum-safe" : "Not quantum-safe"}
+    </Badge>
+  );
+}
+
+// ─── Risk score bar (0–100) ───────────────────────────────────────────────────
+
+export function ScoreBar({ score, max = 100, className }: { score: number; max?: number; className?: string }) {
+  const pct = Math.min(100, Math.max(0, (score / max) * 100));
+  const band = riskBand(score);
+  const t = TONE[band.tone];
+  return (
+    <div className={cn("flex items-center gap-2.5", className)} title={`${band.label}: ${band.advice}`}>
+      <div className="h-1.5 min-w-[56px] flex-1 overflow-hidden rounded-full bg-sunken">
         <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, backgroundColor: color }}
+          className="h-full rounded-full transition-[width] duration-500"
+          style={{ width: `${pct}%`, backgroundColor: t.fill }}
         />
       </div>
-      <span className="text-xs w-6 text-right" style={{ color }}>{score}</span>
+      <span className="num w-7 text-right text-xs font-semibold" style={{ color: t.ink }}>
+        {score}
+      </span>
     </div>
   );
 }
 
-// ─── PQC Score Chip ───────────────────────────────────────────────────────────
+// ─── Post-quantum safety chip (0–10) ──────────────────────────────────────────
 
-interface ScorePillProps {
-  score: number;
-  max?: number;
-  className?: string;
-}
-
-export function ScorePill({ score, max = 10, className }: ScorePillProps) {
-  const pct = score / max;
-  const bg = pct >= 0.7 ? "#00D26A" : pct >= 0.4 ? "#FFD000" : "#FF2B44";
-  const color = pct >= 0.7 ? "#000000" : pct >= 0.4 ? "#000000" : "#FFFFFF";
+export function ScorePill({ score, max = 10, className }: { score: number; max?: number; className?: string }) {
   return (
-    <span
-      className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold", className)}
-      style={{ backgroundColor: bg, color, fontVariantNumeric: "tabular-nums" }}
-    >
+    <Badge tone={pqcTone(score, max)} dot={false} className={cn("num", className)}>
       {score}/{max}
-    </span>
+    </Badge>
   );
 }

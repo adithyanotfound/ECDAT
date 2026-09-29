@@ -14,7 +14,7 @@ import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { Readable } from "stream";
 import { getInstallationOctokit } from "./auth";
-import { Octokit } from "octokit";
+import { safeJoin } from "@/server/security/paths";
 
 export interface Checkout {
   dir: string;
@@ -40,8 +40,10 @@ export async function checkoutTarball(
     });
     buffer = Buffer.from(res.data as ArrayBuffer);
   } else {
-    // For manual/public repos without an app installation, download anonymously
-    const url = `https://github.com/${owner}/${repo}/archive/refs/heads/${ref}.tar.gz`;
+    // For manual/public repos without an app installation, download anonymously.
+    // Each part is encoded so a crafted name can't change which GitHub URL is fetched.
+    const branch = ref.replace(/^refs\/heads\//, "").split("/").map(encodeURIComponent).join("/");
+    const url = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/archive/refs/heads/${branch}.tar.gz`;
     const res = await fetch(url, { redirect: "follow" });
     if (!res.ok) {
       throw new Error(`Failed to fetch tarball from ${url}: ${res.status} ${res.statusText}`);
@@ -73,7 +75,13 @@ export async function checkoutTarball(
           return;
         }
 
-        const dest = join(dir, rel);
+        const dest = safeJoin(dir, rel);
+        if (!dest) {
+          // An entry pointing outside the checkout (zip slip): skip it.
+          stream.resume();
+          next();
+          return;
+        }
         const chunks: Buffer[] = [];
         stream.on("data", (chunk: unknown) => {
           const buf = chunk as Buffer;

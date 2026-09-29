@@ -8,6 +8,9 @@ export async function register() {
     // @peculiar/x509 (certificate detector) needs this polyfill loaded before
     // its own module code runs — load it once, up front, for the whole process.
     await import("reflect-metadata");
+    // Serverless hosts (Vercel) have no long-lived process to poll from; there,
+    // routes run queued scans themselves (src/server/jobs/kick.ts).
+    if (process.env.VERCEL) return;
     const { startWorker } = await import("./src/server/jobs/worker");
     startWorker();
   }

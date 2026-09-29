@@ -9,12 +9,15 @@
  * the full crypto API and cannot read a streaming request body reliably.
  */
 export const runtime = "nodejs";
+// On Vercel, scans queued by a push run in this invocation after the 202 (see runJobsSoon).
+export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
 import { verifyWebhookSignature } from "@/server/github/webhook";
 import { enqueueJob } from "@/server/jobs/queue";
 import { isRateLimited } from "@/server/security/rateLimit";
+import { runJobsSoon } from "@/server/jobs/kick";
 
 // GitHub's own webhook delivery volume from a single App install is bursty
 // but bounded — this ceiling is generous for legitimate traffic and cheap
@@ -74,6 +77,9 @@ export async function POST(req: NextRequest) {
     // Still return 200 to prevent GitHub from retrying with duplicate delivery IDs
   }
 
+  // Serverless hosts have no polling worker: run anything just queued after responding.
+  runJobsSoon();
+
   // 5. Return 202 immediately — never block on slow processing
   return NextResponse.json({ ok: true }, { status: 202 });
 }
@@ -97,7 +103,7 @@ async function handlePush(payload: {
     where: { githubRepoId: repository.id },
     select: { id: true, scanEnabled: true, owner: true, name: true, fullName: true },
   });
-  
+
   if (!repo) {
     // Fallback for manually added repositories
     repo = await prisma.repository.findUnique({
@@ -133,7 +139,7 @@ async function handlePush(payload: {
 
 async function handleInstallation(payload: {
   action: string;
-  installation: { 
+  installation: {
     id: number;
     account?: { login: string; type?: string; avatar_url?: string };
   };

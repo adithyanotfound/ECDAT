@@ -1,52 +1,92 @@
 "use client";
 
+/**
+ * The charcoal navigation rail. Grouped by what a person is trying to do:
+ * see the big picture, connect and scan code, then understand what was found.
+ * Collapses to icons on desktop and slides in as a drawer on small screens.
+ */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { cn } from "@/lib/cn";
 import {
-  LayoutDashboard,
-  ScanLine,
-  ChevronDown,
-  ChevronRight,
-  Package,
   AlertTriangle,
-  Shield,
-  Lightbulb,
-  GitBranch,
-  Database,
+  ChevronsLeft,
+  ChevronsRight,
   Cpu,
+  FileBadge2,
+  GitBranch,
+  LayoutDashboard,
+  Lightbulb,
   LogOut,
-  Network,
+  ShieldCheck,
+  X,
 } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { BrandMark, BrandName } from "./BrandMark";
+
 interface NavItem {
   label: string;
-  href?: string;
+  href: string;
   icon: React.ReactNode;
-  children?: NavItem[];
+  /** One-line explanation shown as a tooltip. */
+  hint: string;
 }
 
-const navItems: NavItem[] = [
+const NAV: { group: string; items: NavItem[] }[] = [
   {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: <LayoutDashboard size={16} />,
-  },
-  {
-    label: "Scanning",
-    icon: <ScanLine size={16} />,
-    children: [
-      { label: "Repositories", href: "/scanning/repositories", icon: <GitBranch size={14} /> },
-      { label: "Scans",        href: "/scanning/scans",       icon: <Cpu size={14} /> },
+    group: "Overview",
+    items: [
+      {
+        label: "Dashboard",
+        href: "/dashboard",
+        icon: <LayoutDashboard size={17} />,
+        hint: "Your overall quantum readiness",
+      },
     ],
   },
   {
-    label: "Assets",
-    icon: <Package size={16} />,
-    children: [
-      { label: "Recommendations", href: "/assets/recommendations", icon: <Lightbulb size={14} /> },
-      { label: "PQC",             href: "/assets/pqc",             icon: <Shield size={14} /> },
-      { label: "Vulnerabilities", href: "/assets/vulnerabilities", icon: <AlertTriangle size={14} /> },
+    group: "Connect & scan",
+    items: [
+      {
+        label: "Repositories",
+        href: "/scanning/repositories",
+        icon: <GitBranch size={17} />,
+        hint: "Code and cloud accounts being watched",
+      },
+      {
+        label: "Scans",
+        href: "/scanning/scans",
+        icon: <Cpu size={17} />,
+        hint: "Every scan, with live logs and changes",
+      },
+    ],
+  },
+  {
+    group: "Understand & fix",
+    items: [
+      {
+        label: "Crypto inventory",
+        href: "/assets/pqc",
+        icon: <ShieldCheck size={17} />,
+        hint: "Every algorithm, key and certificate found",
+      },
+      {
+        label: "Vulnerabilities",
+        href: "/assets/vulnerabilities",
+        icon: <AlertTriangle size={17} />,
+        hint: "Specific problems to fix",
+      },
+      {
+        label: "Recommendations",
+        href: "/assets/recommendations",
+        icon: <Lightbulb size={17} />,
+        hint: "What to move to, and how hard it is",
+      },
+      {
+        label: "CBOM report",
+        href: "/assets/pqc/cbom",
+        icon: <FileBadge2 size={17} />,
+        hint: "Standard bill of materials to share",
+      },
     ],
   },
 ];
@@ -54,197 +94,152 @@ const navItems: NavItem[] = [
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
 
-  const initialOpen: Record<string, boolean> = {};
-  navItems.forEach((item) => {
-    if (item.children) {
-      initialOpen[item.label] = item.children.some((c) => c.href && pathname.startsWith(c.href));
+  // The most specific matching link wins, so /assets/pqc/cbom doesn't also light up /assets/pqc.
+  const allHrefs = NAV.flatMap((g) => g.items.map((i) => i.href));
+  const activeHref = allHrefs
+    .filter((h) => pathname === h || pathname.startsWith(h + "/"))
+    .sort((a, b) => b.length - a.length)[0];
+
+  const signOut = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      // A full page load clears every cached view of the signed-in user's data.
+      window.location.replace("/login");
     }
-  });
+  };
 
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpen);
-  const toggleGroup = (label: string) =>
-    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  const panel = (isMobile: boolean) => {
+    const narrow = collapsed && !isMobile;
+    return (
+      <div className="flex h-full flex-col bg-charcoal text-on-dark-muted">
+        <div
+          className={cn(
+            "flex h-16 items-center gap-2.5 border-b border-white/[0.06]",
+            narrow ? "justify-center px-2" : "px-5",
+          )}
+        >
+          <Link
+            href="/dashboard"
+            onClick={onMobileClose}
+            className="flex items-center gap-2.5"
+            aria-label="ECDAT Atlas dashboard"
+          >
+            <BrandMark size={30} onDark />
+            {!narrow && <BrandName onDark />}
+          </Link>
+          {isMobile && (
+            <button
+              type="button"
+              onClick={onMobileClose}
+              aria-label="Close menu"
+              className="ml-auto rounded-lg p-1.5 hover:bg-white/10"
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
 
-  const isGroupActive = (item: NavItem) =>
-    item.children?.some((c) => c.href && pathname.startsWith(c.href)) ?? false;
-  const isItemActive = (href: string) =>
-    pathname === href || pathname.startsWith(href + "/");
+        <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main">
+          {NAV.map((group) => (
+            <div key={group.group} className="mb-5">
+              {!narrow ? (
+                <p className="mb-1.5 px-3 text-[11px] font-semibold tracking-[0.12em] text-white/40 uppercase">
+                  {group.group}
+                </p>
+              ) : (
+                <div className="mx-auto mb-2 h-px w-6 bg-white/10" />
+              )}
+              <ul className="space-y-0.5">
+                {group.items.map((item) => {
+                  const active = item.href === activeHref;
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        onClick={onMobileClose}
+                        title={narrow ? `${item.label}: ${item.hint}` : item.hint}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "group relative flex items-center gap-3 rounded-xl py-2 text-[14px] font-medium transition-colors",
+                          narrow ? "justify-center px-2" : "px-3",
+                          active ? "bg-white/[0.08] text-white" : "hover:bg-white/[0.05] hover:text-white",
+                        )}
+                      >
+                        {active && (
+                          <span className="absolute top-2 bottom-2 left-0 w-[3px] rounded-full bg-gold-bright" />
+                        )}
+                        <span
+                          className={cn(
+                            "shrink-0",
+                            active ? "text-gold-bright" : "text-on-dark-muted group-hover:text-white",
+                          )}
+                        >
+                          {item.icon}
+                        </span>
+                        {!narrow && <span className="truncate">{item.label}</span>}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        <div className="space-y-0.5 border-t border-white/[0.06] px-3 py-3">
+          {!isMobile && (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-xl py-2 text-[14px] font-medium transition-colors hover:bg-white/[0.05] hover:text-white",
+                narrow ? "justify-center px-2" : "px-3",
+              )}
+            >
+              {collapsed ? <ChevronsRight size={17} /> : <ChevronsLeft size={17} />}
+              {!narrow && "Collapse"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={signOut}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-xl py-2 text-[14px] font-medium transition-colors hover:bg-white/[0.05] hover:text-white",
+              narrow ? "justify-center px-2" : "px-3",
+            )}
+          >
+            <LogOut size={17} />
+            {!narrow && "Sign out"}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <aside
-      className="flex flex-col h-full"
-      style={{
-        width: collapsed ? "64px" : "220px",
-        backgroundColor: "var(--color-sidebar)",
-        borderRight: "1px solid var(--color-border)",
-        flexShrink: 0,
-        transition: "width 0.25s ease",
-      }}
-    >
-      {/* Logo / collapse toggle */}
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-3 px-4 w-full"
-        style={{
-          borderBottom: "1px solid var(--color-border)",
-          minHeight: "64px",
-          background: "transparent",
-          cursor: "pointer",
-        }}
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+    <>
+      <aside
+        className="no-print hidden h-full shrink-0 transition-[width] duration-300 lg:block"
+        style={{ width: collapsed ? 72 : 252 }}
       >
-        <div
-          className="flex items-center justify-center rounded-lg flex-shrink-0"
-          style={{
-            width: "32px",
-            height: "32px",
-            background: "linear-gradient(135deg, var(--color-accent), #6B8FFF)",
-          }}
-        >
-          {collapsed
-            ? <ChevronRight size={18} color="white" />
-            : <Network size={18} color="white" />
-          }
+        {panel(false)}
+      </aside>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-[80] lg:hidden">
+          <div className="absolute inset-0 bg-charcoal/50 animate-fade-in" onClick={onMobileClose} />
+          <div className="absolute top-0 bottom-0 left-0 w-[272px] shadow-pop animate-slide-in">{panel(true)}</div>
         </div>
-        {!collapsed && (
-          <span
-            className="font-bold text-lg tracking-tight"
-            style={{ color: "var(--color-ink)" }}
-          >
-            ecdat
-            <span style={{ color: "var(--color-accent)" }}>atlas</span>
-          </span>
-        )}
-      </button>
-
-      {/* Main nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2">
-        {navItems.map((item) => {
-          const groupActive = isGroupActive(item);
-          return (
-            <div key={item.label} className="mb-1">
-              {item.children ? (
-                <>
-                  <button
-                    onClick={() => toggleGroup(item.label)}
-                    data-tour={`nav-group-${item.label.toLowerCase()}`}
-                    className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium cursor-pointer"
-                    style={{
-                      color: groupActive ? "#fff" : "var(--color-ink-muted)",
-                      backgroundColor: groupActive ? "var(--color-accent)" : "transparent",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!groupActive)
-                        e.currentTarget.style.backgroundColor = "rgba(47,91,255,0.12)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!groupActive)
-                        e.currentTarget.style.backgroundColor = "transparent";
-                    }}
-                  >
-                    <span className="flex-shrink-0">{item.icon}</span>
-                    {!collapsed && (
-                      <>
-                        <span className="flex-1 text-left">{item.label}</span>
-                        {openGroups[item.label]
-                          ? <ChevronDown size={14} />
-                          : <ChevronRight size={14} />
-                        }
-                      </>
-                    )}
-                  </button>
-                  {!collapsed && openGroups[item.label] && (
-                    <div
-                      className="mt-1 ml-4 pl-3 border-l"
-                      style={{ borderColor: "var(--color-border)" }}
-                    >
-                      {item.children.map((child) => (
-                        <Link
-                          key={child.label}
-                          href={child.href!}
-                          data-tour={`nav-${child.label.toLowerCase()}`}
-                          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm mb-0.5"
-                          style={{
-                            color: isItemActive(child.href!)
-                              ? "var(--color-accent)"
-                              : "var(--color-ink-muted)",
-                            backgroundColor: isItemActive(child.href!)
-                              ? "var(--color-accent-sub)"
-                              : "transparent",
-                            fontWeight: isItemActive(child.href!) ? 500 : 400,
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isItemActive(child.href!))
-                              e.currentTarget.style.backgroundColor = "rgba(47,91,255,0.1)";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isItemActive(child.href!))
-                              e.currentTarget.style.backgroundColor = "transparent";
-                          }}
-                        >
-                          <span className="flex-shrink-0">{child.icon}</span>
-                          <span>{child.label}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <Link
-                  href={item.href!}
-                  data-tour={`nav-${item.label.toLowerCase()}`}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium"
-                  style={{
-                    color: isItemActive(item.href!) ? "#fff" : "var(--color-ink-muted)",
-                    backgroundColor: isItemActive(item.href!)
-                      ? "var(--color-accent)"
-                      : "transparent",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isItemActive(item.href!))
-                      e.currentTarget.style.backgroundColor = "rgba(47,91,255,0.12)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isItemActive(item.href!))
-                      e.currentTarget.style.backgroundColor = "transparent";
-                  }}
-                >
-                  <span className="flex-shrink-0">{item.icon}</span>
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              )}
-            </div>
-          );
-        })}
-      </nav>
-
-      {/* Bottom: Getting Started + Logout */}
-      <div className="py-3 px-2 pb-6" style={{ borderTop: "1px solid var(--color-border)" }}>
-
-        <button
-          onClick={async () => {
-            try { await fetch("/api/auth/logout", { method: "POST" }); }
-            finally { window.location.href = "/login"; }
-          }}
-          className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium"
-          style={{ color: "var(--color-ink-muted)", backgroundColor: "transparent", cursor: "pointer" }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "var(--color-surface-2)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "transparent";
-          }}
-        >
-          <span className="flex-shrink-0"><LogOut size={16} /></span>
-          {!collapsed && <span>Logout</span>}
-        </button>
-      </div>
-    </aside>
+      )}
+    </>
   );
 }

@@ -26,3 +26,8 @@ export function formatPercent(n: number, decimals = 0): string {
 export function truncateHash(hash: string, len = 7): string {
   return hash.slice(0, len);
 }
+
+/** True for a real git commit id (not placeholders like "manual" or "HEAD"). */
+export function isCommitSha(value: string | null | undefined): value is string {
+  return !!value && /^[0-9a-f]{7,40}$/i.test(value);
+}

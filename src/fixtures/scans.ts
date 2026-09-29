@@ -1,4 +1,4 @@
-import type { Scan, ScanProfile } from "./types";
+import type { Scan } from "./types";
 
 export const scans: Scan[] = [
   {
@@ -112,48 +112,5 @@ export const scans: Scan[] = [
     startedAt: "2025-09-08T07:45:00Z",
     completedAt: null,
     profileName: "Default Full Scan",
-  },
-];
-
-export const scanProfiles: ScanProfile[] = [
-  {
-    id: "profile-001",
-    name: "Default Full Scan",
-    rulePackIds: ["core", "secrets", "certificates", "keys", "protocols"],
-    includeGlobs: ["**/*"],
-    excludeGlobs: ["**/node_modules/**", "**/vendor/**", "**/.git/**", "**/dist/**", "**/build/**"],
-    maxFileSizeKb: 1024,
-    createdAt: "2025-08-01T00:00:00Z",
-    isDefault: true,
-  },
-  {
-    id: "profile-002",
-    name: "Deep Scan",
-    rulePackIds: ["core", "secrets", "certificates", "keys", "protocols", "dependencies", "iac"],
-    includeGlobs: ["**/*"],
-    excludeGlobs: ["**/node_modules/**", "**/.git/**"],
-    maxFileSizeKb: 5120,
-    createdAt: "2025-08-10T00:00:00Z",
-    isDefault: false,
-  },
-  {
-    id: "profile-003",
-    name: "Config-Only Scan",
-    rulePackIds: ["protocols", "iac"],
-    includeGlobs: ["**/*.conf", "**/*.yaml", "**/*.yml", "**/*.tf", "**/*.toml", "**/*.ini"],
-    excludeGlobs: ["**/node_modules/**", "**/.git/**"],
-    maxFileSizeKb: 512,
-    createdAt: "2025-08-15T00:00:00Z",
-    isDefault: false,
-  },
-  {
-    id: "profile-004",
-    name: "Secrets-Only Scan",
-    rulePackIds: ["secrets"],
-    includeGlobs: ["**/*"],
-    excludeGlobs: ["**/node_modules/**", "**/.git/**", "**/test/**", "**/tests/**"],
-    maxFileSizeKb: 256,
-    createdAt: "2025-08-20T00:00:00Z",
-    isDefault: false,
   },
 ];

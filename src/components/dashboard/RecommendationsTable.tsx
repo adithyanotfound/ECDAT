@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+/**
+ * The dashboard's "fix first" list: the five most valuable migrations, each
+ * as from → to with the effort, linking through to the full list.
+ */
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Lightbulb } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Lightbulb } from "lucide-react";
+import { Card, CardHeader } from "@/components/ui/Card";
+import { EffortPill } from "@/components/ui/Pill";
+import { SkeletonBlock } from "@/components/ui/States";
 
 interface Recommendation {
   id: string;
@@ -13,132 +20,69 @@ interface Recommendation {
   repositoryFullName: string;
 }
 
-const EFFORT_STYLES = {
-  HIGH:   { c: "#FFFFFF", bg: "#FF2B44", border: "#FF2B44" },
-  MEDIUM: { c: "#000000", bg: "#FFD000", border: "#FFD000" },
-  LOW:    { c: "#000000", bg: "#00D26A", border: "#00D26A" },
-};
-
-function EffortBadge({ effort }: { effort: "HIGH" | "MEDIUM" | "LOW" }) {
-  const s = EFFORT_STYLES[effort] ?? EFFORT_STYLES.MEDIUM;
-  return (
-    <span
-      className="inline-flex items-center text-xs px-2.5 py-0.5 rounded-full font-semibold"
-      style={{ color: s.c, backgroundColor: s.bg, border: `1px solid ${s.border}` }}
-    >
-      {effort}
-    </span>
-  );
-}
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 14px",
-  fontSize: "12px",
-  fontWeight: 600,
-  color: "var(--color-ink-muted)",
-  backgroundColor: "var(--color-thead)",
-  borderBottom: "1px solid var(--color-border)",
-  whiteSpace: "nowrap",
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  fontSize: "13px",
-  borderBottom: "1px solid var(--color-border)",
-  verticalAlign: "middle",
-};
-
 export function RecommendationsTable() {
-  const [items, setItems] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<Recommendation[] | null>(null);
 
   useEffect(() => {
-    fetch("/api/recommendations?pageSize=5&sort=effort")
-      .then((r) => r.json())
-      .then((d) => setItems(d.items ?? []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
+    // Lowest effort first: quick wins come before redesigns.
+    fetch("/api/recommendations?pageSize=100&sort=effort")
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((d: { items?: Recommendation[] }) => {
+        const all = d.items ?? [];
+        const order = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+        setItems([...all].sort((a, b) => order[a.effort] - order[b.effort]).slice(0, 5));
+      })
+      .catch(() => setItems([]));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="rounded-xl p-5" style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
-        <div className="flex items-center gap-2 mb-4">
-          <Lightbulb size={15} style={{ color: "var(--color-accent)" }} />
-          <span className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>Remediation Priority</span>
-        </div>
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-10 rounded animate-pulse" style={{ backgroundColor: "var(--color-surface-2)" }} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (items.length === 0) return null;
-
   return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wide" style={{ color: "var(--color-ink-muted)" }}>
-        Recommendations
-      </h2>
-      <div className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
-        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--color-border)" }}>
-          <div className="flex items-center gap-2">
-            <Lightbulb size={14} style={{ color: "var(--color-accent)" }} />
-            <span className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>Remediation Priority</span>
-          </div>
+    <Card>
+      <CardHeader
+        icon={<Lightbulb size={16} />}
+        title="Quick wins to start with"
+        subtitle="The easiest upgrades first, so progress shows early"
+        term="recommendation"
+        action={
           <Link
             href="/assets/recommendations"
-            className="text-xs flex items-center gap-1 font-medium"
-            style={{ color: "var(--color-accent)" }}
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-gold-ink hover:underline"
           >
-            View All <ArrowRight size={11} />
+            All recommendations <ArrowUpRight size={14} />
           </Link>
+        }
+      />
+      {items === null ? (
+        <div className="space-y-3 p-5">
+          {[0, 1, 2].map((i) => (
+            <SkeletonBlock key={i} className="h-11" />
+          ))}
         </div>
-
-        <table className="w-full">
-          <thead>
-            <tr>
-              <th style={thStyle}>Current Algorithm</th>
-              <th style={thStyle}>Upgrade To</th>
-              <th style={thStyle}>Effort</th>
-              <th style={thStyle}>Repository</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((rec) => (
-              <tr
-                key={rec.id}
-                style={{ backgroundColor: "var(--color-surface)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface-2)")}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface)")}
-              >
-                <td style={tdStyle}>
-                  <span className="font-mono text-xs" style={{ color: "var(--color-critical)" }}>
-                    {rec.fromAlgorithm}
-                  </span>
-                </td>
-                <td style={tdStyle}>
-                  <span className="font-mono text-xs" style={{ color: "var(--color-safe)" }}>
-                    {rec.toAlgorithm}
-                  </span>
-                </td>
-                <td style={tdStyle}>
-                  <EffortBadge effort={rec.effort} />
-                </td>
-                <td style={tdStyle}>
-                  <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                    {rec.repositoryFullName}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      ) : items.length === 0 ? (
+        <p className="px-5 py-10 text-center text-[13.5px] text-muted">
+          No recommendations yet. They appear after a scan finds something to replace.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {items.map((rec) => (
+            <li key={rec.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+              <span className="flex min-w-0 flex-1 items-center gap-2.5 text-[13.5px]">
+                <span className="rounded-md bg-critical-tint px-2 py-0.5 font-mono text-[12.5px] text-critical-ink">
+                  {rec.fromAlgorithm}
+                </span>
+                <ArrowRight size={14} className="shrink-0 text-faint" />
+                <span className="rounded-md bg-safe-tint px-2 py-0.5 font-mono text-[12.5px] text-safe-ink">
+                  {rec.toAlgorithm}
+                </span>
+                {rec.standard && <span className="hidden text-xs text-muted md:inline">{rec.standard}</span>}
+              </span>
+              <span className="hidden max-w-[220px] truncate text-[13px] text-muted lg:block">
+                {rec.repositoryFullName}
+              </span>
+              <EffortPill effort={rec.effort} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

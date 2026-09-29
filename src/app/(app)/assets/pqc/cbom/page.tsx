@@ -1,9 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { SeverityPill } from "@/components/ui/Pill";
-import { Download, Printer } from "lucide-react";
-import type { Repository, Finding } from "@/fixtures/types";
+/**
+ * CBOM report: the standard CycloneDX 1.6 list of a repository's
+ * cryptography, ready to hand to an auditor. Pick a repository, read the
+ * summary, then the full component list and its open problems. Downloads as
+ * JSON (the standard) or PDF (for people).
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download, FileBadge2, FileText, Printer, RefreshCw } from "lucide-react";
+import type { Finding, Repository } from "@/fixtures/types";
+import { Card, CardHeader, PageHeader } from "@/components/ui/Card";
+import { Button, buttonClass } from "@/components/ui/Button";
+import { FilterChips, inputClass } from "@/components/ui/Controls";
+import { Badge, SeverityPill } from "@/components/ui/Pill";
+import { EmptyState, Notice, SkeletonBlock } from "@/components/ui/States";
+import { StatCard } from "@/components/ui/StatCard";
+import { InfoHint } from "@/components/ui/InfoHint";
 
 interface CbomComponent {
   type: string;
@@ -37,346 +49,354 @@ interface CbomResponse {
   cbom: CbomDoc;
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 14px",
-  fontSize: "12px",
-  fontWeight: 600,
-  color: "var(--color-ink-muted)",
-  backgroundColor: "var(--color-thead)",
-  borderBottom: "1px solid var(--color-border)",
-  whiteSpace: "nowrap",
-};
-const tdStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  fontSize: "13px",
-  color: "var(--color-ink)",
-  borderBottom: "1px solid var(--color-border)",
-  verticalAlign: "middle",
-};
-
-const pqcColor = (safe: boolean) =>
-  safe
-    ? { color: "#3FCF8E", bg: "rgba(63,207,142,0.12)", border: "rgba(63,207,142,0.4)" }
-    : { color: "#F0516B", bg: "rgba(240,81,107,0.12)", border: "rgba(240,81,107,0.4)" };
+const isSafe = (c: CbomComponent) => (c.cryptoProperties.algorithmProperties?.nistQuantumSecurityLevel ?? 0) > 0;
+const isAlgo = (c: CbomComponent) => !!c.cryptoProperties.algorithmProperties;
 
 export default function CbomReportPage() {
-  const [repos, setRepos] = useState<Repository[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState<string>("");
+  const [repos, setRepos] = useState<Repository[] | null>(null);
+  const [repoId, setRepoId] = useState("");
   const [report, setReport] = useState<CbomResponse | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"safe" | "vulnerable" | "">("");
 
   useEffect(() => {
     fetch("/api/repositories")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : []))
       .then((data: Repository[]) => {
-        setRepos(data ?? []);
-        const scanned = data?.find((r) => r.lastScanStatus === "Completed");
-        setSelectedRepoId(scanned?.id ?? data?.[0]?.id ?? "");
-      });
+        const list = Array.isArray(data) ? data : [];
+        setRepos(list);
+        const fromUrl = new URLSearchParams(window.location.search).get("repositoryId");
+        const scanned = list.find((r) => r.lastScanStatus === "Completed");
+        setRepoId(list.find((r) => r.id === fromUrl)?.id ?? scanned?.id ?? list[0]?.id ?? "");
+      })
+      .catch(() => setRepos([]));
   }, []);
 
-  const loadReport = useCallback(async (repositoryId: string) => {
-    if (!repositoryId) return;
+  const loadReport = useCallback(async (id: string) => {
+    if (!id) return;
     setLoading(true);
     setError(null);
     try {
       const [cbomRes, findingsRes] = await Promise.all([
-        fetch(`/api/repositories/${repositoryId}/cbom`),
-        fetch(`/api/findings?repositoryId=${repositoryId}&pageSize=6`),
+        fetch(`/api/repositories/${id}/cbom`),
+        fetch(`/api/findings?repositoryId=${encodeURIComponent(id)}&status=OPEN&pageSize=100`),
       ]);
       if (!cbomRes.ok) {
         setReport(null);
-        setError((await cbomRes.json().catch(() => null))?.error ?? "No CBOM available yet — run a scan first.");
+        setError(
+          (await cbomRes.json().catch(() => null))?.error ?? "No CBOM yet. Run a scan on this repository first.",
+        );
       } else {
         setReport(await cbomRes.json());
       }
-      const findingsData = await findingsRes.json().catch(() => null);
-      setFindings(findingsData?.items ?? []);
+      const f = await findingsRes.json().catch(() => null);
+      setFindings(f?.items ?? []);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (selectedRepoId) loadReport(selectedRepoId);
-  }, [selectedRepoId, loadReport]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch the report for the chosen repository
+    if (repoId) loadReport(repoId);
+  }, [repoId, loadReport]);
 
-  const components = report?.cbom.components ?? [];
-  const algoComponents = components.filter((c) => c.cryptoProperties.algorithmProperties);
-  const strongAlgos = algoComponents.filter((c) => (c.cryptoProperties.algorithmProperties?.nistQuantumSecurityLevel ?? 0) > 0);
-  const weakAlgos = algoComponents.filter((c) => (c.cryptoProperties.algorithmProperties?.nistQuantumSecurityLevel ?? 0) === 0);
+  const components = useMemo(() => report?.cbom.components ?? [], [report]);
+  const algos = components.filter(isAlgo);
+  const safe = algos.filter(isSafe).length;
+  const shown = components.filter(
+    (c) => !filter || (filter === "safe" ? isAlgo(c) && isSafe(c) : !(isAlgo(c) && isSafe(c))),
+  );
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
     if (!report) return;
-    import("jspdf").then(({ default: jsPDF }) => {
-      import("jspdf-autotable").then(({ default: autoTable }) => {
-        const doc = new jsPDF("p", "pt", "a4");
-        
-        // Header
-        doc.setFontSize(18);
-        doc.text(`CBOM Report: ${report.repositoryFullName}`, 40, 40);
-        doc.setFontSize(10);
-        doc.setTextColor(100);
-        doc.text(`Commit: ${report.commitSha} | Scan: ${new Date(report.completedAt).toLocaleString()}`, 40, 55);
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+    const doc = new jsPDF("p", "pt", "a4");
+    const charcoal: [number, number, number] = [31, 33, 38];
+    const gold: [number, number, number] = [196, 150, 44];
+    const lastY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
-        // Component Table
-        doc.setFontSize(14);
-        doc.setTextColor(0);
-        doc.text("Component Details", 40, 80);
-        autoTable(doc, {
-          startY: 90,
-          head: [["Name", "Type", "Version", "Cryptographic Assets"]],
-          body: [[
-            report.cbom.metadata.component.name || "", 
-            "Application", 
-            report.cbom.metadata.component.version || "", 
-            components.length.toString()
-          ]],
-          theme: "grid",
-        });
+    doc.setFillColor(...charcoal);
+    doc.rect(0, 0, 595, 70, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.text(`CBOM report: ${report.repositoryFullName}`, 40, 36);
+    doc.setFontSize(9);
+    doc.setTextColor(217, 174, 74);
+    doc.text(
+      `CycloneDX ${report.cbom.specVersion} · commit ${report.commitSha} · scanned ${new Date(report.completedAt).toLocaleString()}`,
+      40,
+      54,
+    );
 
-        // Assets Table
-        doc.setFontSize(14);
-        doc.text("Cryptographic Assets", 40, (doc as any).lastAutoTable.finalY + 30);
-        autoTable(doc, {
-          startY: (doc as any).lastAutoTable.finalY + 40,
-          head: [["Component", "Type", "Primitive", "Key Length", "PQC Safe?", "Reference"]],
-          body: components.map(c => {
-            const ap = c.cryptoProperties.algorithmProperties;
-            const safe = (ap?.nistQuantumSecurityLevel ?? 0) > 0;
-            return [
-              c.name,
-              c.cryptoProperties.assetType,
-              ap?.primitive ?? "—",
-              ap?.parameterSetIdentifier ?? "—",
-              safe ? "Yes" : "No",
-              c.evidence.occurrences[0]?.location ?? "N/A"
-            ];
-          }),
-          theme: "grid",
-          styles: { fontSize: 9 },
-          headStyles: { fillColor: [47, 91, 255] }
-        });
+    doc.setTextColor(0);
+    doc.setFontSize(12);
+    doc.text(
+      `Summary: ${components.length} components, ${safe} quantum-safe, ${algos.length - safe} quantum-vulnerable.`,
+      40,
+      96,
+    );
 
-        // Vulnerabilities
-        doc.setFontSize(14);
-        doc.text("Vulnerabilities", 40, (doc as any).lastAutoTable.finalY + 30);
-        autoTable(doc, {
-          startY: (doc as any).lastAutoTable.finalY + 40,
-          head: [["ID", "Severity", "Title", "Affected Component"]],
-          body: findings.map(f => [
-            f.code,
-            f.severity,
-            f.title,
-            f.affectedComponent
-          ]),
-          theme: "grid",
-          styles: { fontSize: 9 },
-          headStyles: { fillColor: [47, 91, 255] }
-        });
-
-        doc.save(`${report.repositoryFullName.replace(/\//g, '-')}-cbom.pdf`);
-      });
+    autoTable(doc, {
+      startY: 112,
+      head: [["Component", "Type", "Primitive", "Key size", "Quantum-safe", "Where"]],
+      body: components.map((c) => {
+        const ap = c.cryptoProperties.algorithmProperties;
+        return [
+          c.name,
+          c.cryptoProperties.assetType,
+          ap?.primitive ?? "–",
+          ap?.parameterSetIdentifier ?? "–",
+          isAlgo(c) ? (isSafe(c) ? "Yes" : "No") : "–",
+          c.evidence.occurrences[0]?.location ?? "–",
+        ];
+      }),
+      theme: "grid",
+      styles: { fontSize: 8.5 },
+      headStyles: { fillColor: charcoal, textColor: 255 },
+      alternateRowStyles: { fillColor: [246, 244, 239] },
     });
+
+    doc.setFontSize(12);
+    doc.text("Open vulnerabilities", 40, lastY() + 30);
+    autoTable(doc, {
+      startY: lastY() + 40,
+      head: [["Rule", "Severity", "Problem", "Affects"]],
+      body: findings.length
+        ? findings.map((f) => [f.code, f.severity, f.title, f.affectedComponent])
+        : [["–", "–", "No open vulnerabilities", "–"]],
+      theme: "grid",
+      styles: { fontSize: 8.5 },
+      headStyles: { fillColor: gold, textColor: charcoal },
+    });
+
+    doc.save(`${report.repositoryFullName.replace(/[^A-Za-z0-9._-]+/g, "-")}-cbom.pdf`);
   };
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
-      <style>{`
-        @media print {
-          .no-print, aside, header { display: none !important; }
-          body, main, .flex-1, .app-container {
-            background: white !important;
-            color: black !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-            max-width: none !important;
-          }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          @page { margin: 1.5cm; }
-          .rounded-xl, .rounded-t-xl, .rounded-b-xl { border-radius: 4px !important; }
-          table, th, td { border-color: #ddd !important; }
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Understand & fix"
+        title="CBOM report"
+        description={
+          <>
+            A standard list of every cryptographic component in a repository, in the CycloneDX 1.6 format auditors and
+            other tools can read.{" "}
+            <span className="inline-flex items-center gap-1">
+              What&apos;s a CBOM? <InfoHint label="CBOM" term="cbom" />
+            </span>
+          </>
         }
-      `}</style>
+        actions={
+          report && (
+            <>
+              <Button onClick={generatePDF}>
+                <Printer size={16} /> Download PDF
+              </Button>
+              <a href={`/api/repositories/${repoId}/cbom?download=1`} className={buttonClass("primary")}>
+                <Download size={16} /> Download CBOM (JSON)
+              </a>
+            </>
+          )
+        }
+      />
 
-      {/* Title & selector row */}
-      <div className="no-print">
-        <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--color-ink)" }}>
-          CBOM Report
-        </h1>
-        <div className="flex items-end gap-3 flex-wrap">
-          <div>
-            <label className="text-xs mb-1 block" style={{ color: "var(--color-ink-muted)" }}>
-              Select Repository*
-            </label>
+      <Card className="no-print">
+        <div className="flex flex-wrap items-end gap-3 p-5">
+          <label className="flex min-w-[260px] flex-1 flex-col gap-1.5 sm:max-w-md">
+            <span className="text-[13px] font-medium text-ink-2">Repository</span>
             <select
-              value={selectedRepoId}
-              onChange={(e) => setSelectedRepoId(e.target.value)}
-              className="rounded-lg px-3 py-2 text-sm"
-              style={{
-                backgroundColor: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-ink)",
-                minWidth: "260px",
-              }}
+              value={repoId}
+              onChange={(e) => setRepoId(e.target.value)}
+              className={inputClass}
+              disabled={!repos?.length}
             >
-              {repos.length === 0 && <option>No repositories connected</option>}
-              {repos.map((r) => (
+              {repos === null && <option>Loading…</option>}
+              {repos?.length === 0 && <option>No repositories connected</option>}
+              {repos?.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.fullName} {r.lastScanStatus !== "Completed" ? `(${r.lastScanStatus ?? "not scanned"})` : ""}
+                  {r.fullName}
+                  {r.lastScanStatus !== "Completed"
+                    ? ` (${r.lastScanStatus ? r.lastScanStatus.toLowerCase() : "not scanned"})`
+                    : ""}
                 </option>
               ))}
             </select>
-          </div>
-          <button
-            onClick={() => loadReport(selectedRepoId)}
-            className="px-5 py-2 rounded-lg text-sm font-medium"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            {loading ? "Loading…" : "Refresh"}
-          </button>
+          </label>
+          <Button onClick={() => loadReport(repoId)} disabled={!repoId || loading}>
+            <RefreshCw size={15} className={loading ? "animate-spin" : undefined} /> Refresh
+          </Button>
         </div>
-      </div>
+      </Card>
 
-      {error && (
-        <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}>
-          {error}
+      {repos?.length === 0 && (
+        <Card>
+          <EmptyState icon={<FileBadge2 size={22} />} title="Nothing to report on yet">
+            Add a repository on the Repositories page. Its CBOM is ready as soon as the first scan finishes.
+          </EmptyState>
+        </Card>
+      )}
+
+      {error && !loading && <Notice tone="moderate">{error}</Notice>}
+
+      {loading && !report && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <SkeletonBlock key={i} className="h-28 rounded-2xl" />
+          ))}
         </div>
       )}
 
       {report && (
         <>
-          {/* Report header */}
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <h2 className="text-lg font-bold" style={{ color: "var(--color-ink)" }}>
-                {report.repositoryFullName} — CBOM (CycloneDX {report.cbom.specVersion})
-              </h2>
-              <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-                Commit {report.commitSha} · Last Scan: {new Date(report.completedAt).toLocaleString()}
-              </p>
-            </div>
-            <div className="flex items-center gap-3 no-print">
-              <button
-                onClick={generatePDF}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}
-              >
-                <Printer size={13} /> Download PDF
-              </button>
-              <a
-                href={`/api/repositories/${selectedRepoId}/cbom?download=1`}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-              >
-                <Download size={13} /> Download CBOM
-              </a>
-            </div>
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
+            <FileText size={15} />
+            <span className="font-medium text-ink">{report.repositoryFullName}</span>
+            <span>·</span>
+            <span>CycloneDX {report.cbom.specVersion}</span>
+            <span>·</span>
+            <span className="font-mono">{report.commitSha}</span>
+            <span>·</span>
+            <span>Scanned {new Date(report.completedAt).toLocaleString()}</span>
           </div>
 
-          {/* Component */}
-          <section>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--color-ink)" }}>
-              Component
-            </h3>
-            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-              <table className="w-full">
-                <thead>
-                  <tr>{["Name", "Type", "Version (commit)", "Cryptographic Assets"].map((h) => <th key={h} style={thStyle}>{h}</th>)}</tr>
-                </thead>
-                <tbody>
-                  <tr style={{ backgroundColor: "var(--color-surface)" }}>
-                    <td style={tdStyle}>{report.cbom.metadata.component.name}</td>
-                    <td style={tdStyle}>Application</td>
-                    <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "12px" }}>{report.cbom.metadata.component.version}</td>
-                    <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums" }}>{components.length}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          <section className="grid gap-4 sm:grid-cols-3">
+            <StatCard
+              title="Components"
+              value={components.length}
+              subtitle="Cryptographic items in this CBOM"
+              term="asset"
+              tone="gold"
+            />
+            <StatCard
+              title="Quantum-safe"
+              value={safe}
+              subtitle={`of ${algos.length} algorithms`}
+              term="quantumSafe"
+              tone="safe"
+            />
+            <StatCard
+              title="Quantum-vulnerable"
+              value={algos.length - safe}
+              subtitle="Need a post-quantum replacement"
+              tone="critical"
+            />
           </section>
 
-          {/* Cryptographic Assets */}
-          <section>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--color-ink)" }}>
-              Cryptographic Assets
-            </h3>
-            <div
-              className="rounded-t-xl p-4"
-              style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)", borderBottom: "none" }}
-            >
-              <p className="text-xs font-semibold mb-2" style={{ color: "var(--color-ink)" }}>Summary</p>
-              <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                <p><span style={{ color: "#3FCF8E" }}>• Quantum-safe assets: </span>{strongAlgos.length}</p>
-                <p><span style={{ color: "#F0516B" }}>• Quantum-vulnerable assets: </span>{weakAlgos.length}</p>
-              </div>
-            </div>
-            <div className="rounded-b-xl overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-              <table className="w-full" style={{ backgroundColor: "var(--color-surface)" }}>
+          <Card>
+            <CardHeader
+              title="Components"
+              subtitle="Everything listed in the CBOM, with where it was found"
+              action={
+                <FilterChips
+                  label="Quantum safety"
+                  value={filter}
+                  onChange={setFilter}
+                  allCount={components.length}
+                  options={[
+                    { value: "vulnerable", label: "Vulnerable", tone: "critical" },
+                    { value: "safe", label: "Safe", tone: "safe" },
+                  ]}
+                />
+              }
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
                 <thead>
-                  <tr>{["Component", "Type", "Primitive", "Key Length", "PQC Safe?", "Reference"].map((h) => <th key={h} style={thStyle}>{h}</th>)}</tr>
+                  <tr className="border-b border-line bg-surface-2/70 text-left text-[12.5px] text-muted">
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Component
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Type
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Primitive
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Key size
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Quantum-safe
+                    </th>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Where
+                    </th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {components.slice(0, 60).map((c) => {
+                  {shown.slice(0, 200).map((c) => {
                     const ap = c.cryptoProperties.algorithmProperties;
-                    const safe = (ap?.nistQuantumSecurityLevel ?? 0) > 0;
-                    const pqs = pqcColor(safe);
                     return (
-                      <tr key={c["bom-ref"]}>
-                        <td style={{ ...tdStyle, fontSize: "12px", fontFamily: "monospace" }}>{c.name}</td>
-                        <td style={tdStyle}>{c.cryptoProperties.assetType}</td>
-                        <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "12px" }}>{ap?.primitive ?? "—"}</td>
-                        <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums" }}>{ap?.parameterSetIdentifier ?? "—"}</td>
-                        <td style={tdStyle}>
-                          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ color: pqs.color, backgroundColor: pqs.bg, border: `1px solid ${pqs.border}` }}>
-                            {safe ? "Yes" : "No"}
-                          </span>
+                      <tr key={c["bom-ref"]} className="border-b border-line last:border-0">
+                        <td className="px-4 py-3 font-mono text-[12.5px] text-ink">{c.name}</td>
+                        <td className="px-4 py-3 text-ink-2">{c.cryptoProperties.assetType}</td>
+                        <td className="px-4 py-3 font-mono text-[12.5px] text-ink-2">{ap?.primitive ?? "–"}</td>
+                        <td className="num px-4 py-3 text-ink-2">{ap?.parameterSetIdentifier ?? "–"}</td>
+                        <td className="px-4 py-3">
+                          {isAlgo(c) ? (
+                            <Badge tone={isSafe(c) ? "safe" : "critical"}>{isSafe(c) ? "Yes" : "No"}</Badge>
+                          ) : (
+                            <span className="text-muted">–</span>
+                          )}
                         </td>
-                        <td style={{ ...tdStyle, fontSize: "12px", fontFamily: "monospace", color: "var(--color-ink-faint)" }}>
-                          {c.evidence.occurrences[0]?.location ?? "N/A"}
+                        <td
+                          className="max-w-[320px] truncate px-4 py-3 font-mono text-xs text-muted"
+                          title={c.evidence.occurrences[0]?.location}
+                        >
+                          {c.evidence.occurrences[0]?.location ?? "–"}
                         </td>
                       </tr>
                     );
                   })}
-                  {components.length === 0 && (
-                    <tr><td style={tdStyle} colSpan={6}>No cryptographic assets recorded for this repository yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Vulnerabilities */}
-          <section>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--color-ink)" }}>
-              Vulnerabilities
-            </h3>
-            <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-              <table className="w-full" style={{ backgroundColor: "var(--color-surface)" }}>
-                <thead>
-                  <tr>{["ID", "Severity", "Title", "Detail", "Affected Component"].map((h) => <th key={h} style={thStyle}>{h}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {findings.map((f) => (
-                    <tr key={f.id}>
-                      <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: "12px" }}>{f.code}</td>
-                      <td style={tdStyle}><SeverityPill severity={f.severity} /></td>
-                      <td style={tdStyle}>{f.title}</td>
-                      <td style={{ ...tdStyle, maxWidth: "280px", fontSize: "12px", color: "var(--color-ink-muted)" }}>{f.detail}</td>
-                      <td style={tdStyle}>{f.affectedComponent}</td>
+                  {shown.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-10 text-center text-[13.5px] text-muted">
+                        Nothing in this filter.
+                      </td>
                     </tr>
-                  ))}
-                  {findings.length === 0 && (
-                    <tr><td style={tdStyle} colSpan={5}>No open findings for this repository.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-          </section>
+            {shown.length > 200 && (
+              <p className="border-t border-line px-5 py-3 text-[13px] text-muted">
+                Showing the first 200 of {shown.length}. The JSON download has all of them.
+              </p>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Open vulnerabilities"
+              subtitle={`Problems still present in ${report.repositoryFullName}`}
+              term="finding"
+            />
+            {findings.length === 0 ? (
+              <p className="px-5 py-10 text-center text-[13.5px] text-muted">
+                No open vulnerabilities in this repository.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {findings.map((f) => (
+                  <li key={f.id} className="flex items-start gap-3 px-5 py-3.5">
+                    <SeverityPill severity={f.severity} className="mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-[13.5px] font-medium text-ink">{f.title}</p>
+                      <p className="text-xs text-muted">
+                        <span className="font-mono">{f.code}</span> · {f.affectedComponent}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </>
       )}
     </div>

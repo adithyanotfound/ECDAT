@@ -6,19 +6,17 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
+import { ownedRepositoryOr404, safeFilename, sessionOr401 } from "@/server/auth/guard";
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await sessionOr401();
+  if (session instanceof NextResponse) return session;
+
   const { id: repositoryId } = await params;
   const download = req.nextUrl.searchParams.get("download");
 
-  const repo = await prisma.repository.findUnique({
-    where: { id: repositoryId },
-    select: { fullName: true },
-  });
-  if (!repo) return NextResponse.json({ error: "Repository not found" }, { status: 404 });
+  const repo = await ownedRepositoryOr404(session, repositoryId);
+  if (repo instanceof NextResponse) return repo;
 
   const scan = await prisma.scan.findFirst({
     where: { repositoryId, status: "COMPLETED", cbom: { isNot: null } },
@@ -27,14 +25,14 @@ export async function GET(
   });
 
   if (!scan?.cbom) {
-    return NextResponse.json({ error: "No CBOM available yet — run a scan first" }, { status: 404 });
+    return NextResponse.json({ error: "No CBOM yet. Run a scan on this repository first." }, { status: 404 });
   }
 
   if (download) {
     return new NextResponse(JSON.stringify(scan.cbom.json, null, 2), {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${repo.fullName.replace("/", "-")}-cbom.json"`,
+        "Content-Disposition": `attachment; filename="${safeFilename(repo.fullName)}-cbom.json"`,
       },
     });
   }

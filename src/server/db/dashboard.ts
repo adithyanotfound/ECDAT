@@ -10,12 +10,7 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
   const session = await requireSession();
   const owner = session.login;
 
-  const [
-    totalAssets,
-    highRiskAssets,
-    vulnAssets,
-    assetsRaw,
-  ] = await Promise.all([
+  const [totalAssets, highRiskAssets, vulnAssets, assetsRaw] = await Promise.all([
     prisma.cryptoAsset.count({ where: { repository: { owner } } }),
     prisma.riskAssessment.count({ where: { crsfScore: { gte: 70 }, cryptoAsset: { repository: { owner } } } }),
     prisma.riskAssessment.count({ where: { crsfScore: { gt: 0 }, cryptoAsset: { repository: { owner } } } }),
@@ -25,22 +20,33 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     }),
   ]);
 
-  const kindCounts = assetsRaw.reduce((acc, curr) => {
-    acc[curr.kind] = (acc[curr.kind] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-  const assetsByKind = Object.entries(kindCounts).map(([kind, _count]) => ({ kind, _count: { kind: _count } })).sort((a, b) => b._count.kind - a._count.kind);
+  const kindCounts = assetsRaw.reduce(
+    (acc, curr) => {
+      acc[curr.kind] = (acc[curr.kind] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+  const assetsByKind = Object.entries(kindCounts)
+    .map(([kind, _count]) => ({ kind, _count: { kind: _count } }))
+    .sort((a, b) => b._count.kind - a._count.kind);
 
   // Quantum readiness: average PQC safety score, rolled up to 0–10.
   // Scoped to actual cryptographic primitives (algorithms, keys, certs) —
   // a LIBRARY row (dependency presence) or a PROTOCOL row (TLS version pin,
   // already captured separately as a finding) isn't itself a graded
   // primitive and would dilute the signal this score exists to give.
+  // No scored assets means no score: never a made-up middle value.
   const avgPqc = await prisma.riskAssessment.aggregate({
     where: { cryptoAsset: { kind: { in: ["ALGORITHM", "CERTIFICATE", "KEY"] }, repository: { owner } } },
     _avg: { pqcSafetyScore: true },
+    _count: { _all: true },
   });
-  const quantumReadinessScore = Math.round(avgPqc._avg.pqcSafetyScore ?? 5);
+  const quantumReadinessBasis = avgPqc._count._all;
+  const quantumReadinessScore =
+    quantumReadinessBasis > 0 && avgPqc._avg.pqcSafetyScore != null
+      ? Math.round(avgPqc._avg.pqcSafetyScore * 10) / 10
+      : null;
 
   // Repositories scanned
   const repositoriesScanned = await prisma.scan.findMany({
@@ -52,13 +58,16 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
   // Build posture breakdown from risk assessments
   const allRiskAssessments = await prisma.riskAssessment.findMany({
     where: { cryptoAsset: { repository: { owner } } },
-    select: { riskCategory: true }
+    select: { riskCategory: true },
   });
   const postureRaw = Object.entries(
-    allRiskAssessments.reduce((acc, { riskCategory }) => {
-      acc[riskCategory] = (acc[riskCategory] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>)
+    allRiskAssessments.reduce(
+      (acc, { riskCategory }) => {
+        acc[riskCategory] = (acc[riskCategory] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
   ).map(([riskCategory, count]) => ({ riskCategory, _count: { riskCategory: count } }));
   const total = postureRaw.reduce((s, r) => s + r._count.riskCategory, 0) || 1;
   const posturePct = (cat: string) => {
@@ -118,7 +127,7 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     where: {
       kind: "ALGORITHM",
       primitive: { in: ["signature", "key-agreement"] },
-      repository: { owner }
+      repository: { owner },
     },
     select: { name: true },
     take: 50,
@@ -126,7 +135,9 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
 
   const buildDistribution = (items: { name: string }[]) => {
     const counts: Record<string, number> = {};
-    items.forEach((i) => { counts[i.name] = (counts[i.name] ?? 0) + 1; });
+    items.forEach((i) => {
+      counts[i.name] = (counts[i.name] ?? 0) + 1;
+    });
     const total = Object.values(counts).reduce((s, v) => s + v, 0) || 1;
     return Object.entries(counts)
       .sort(([, a], [, b]) => b - a)
@@ -137,11 +148,11 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
       }));
   };
 
-  const vulnerableAssetsPercent =
-    total > 0 ? Math.round((vulnAssets / total) * 100) : 0;
+  const vulnerableAssetsPercent = total > 0 ? Math.round((vulnAssets / total) * 100) : 0;
 
   return {
     quantumReadinessScore,
+    quantumReadinessBasis,
     cryptographicAssetsCount: totalAssets,
     repositoriesScanned: repositoriesScanned.length,
     vulnerableAssetsPercent,
@@ -164,7 +175,10 @@ function inferArtefactSource(filePath: string | null, ruleCode: string): string 
   if (/\.(pem|crt|cer|der|jks|p12|pfx)$/.test(p) || /^cert-/.test(code)) {
     return /\.(jks|p12|pfx)$/.test(p) ? "Keystores" : "Certificates";
   }
-  if (/(package\.json|requirements|pom\.xml|build\.gradle|go\.mod|cargo\.toml|cmakelists)/.test(p) || /^manifest-/.test(code)) {
+  if (
+    /(package\.json|requirements|pom\.xml|build\.gradle|go\.mod|cargo\.toml|cmakelists)/.test(p) ||
+    /^manifest-/.test(code)
+  ) {
     return "Dependencies";
   }
   if (/^secret-/.test(code)) return "Secrets";

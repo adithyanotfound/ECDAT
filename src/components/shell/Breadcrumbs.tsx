@@ -4,51 +4,44 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
-const segmentLabels: Record<string, string> = {
+const LABELS: Record<string, string> = {
   dashboard: "Dashboard",
-  scanning: "Scanning",
+  scanning: "Connect & scan",
   repositories: "Repositories",
-  profiles: "Profiles",
   scans: "Scans",
-  assets: "Assets",
+  assets: "Understand & fix",
   recommendations: "Recommendations",
-  pqc: "PQC",
+  pqc: "Crypto inventory",
   vulnerabilities: "Vulnerabilities",
-  reports: "Reports",
-  knowledge: "Knowledge",
-  settings: "Settings",
-  users: "Users",
-  cbom: "CBOM Report",
+  cbom: "CBOM report",
 };
+
+// Group segments have no page of their own, so they aren't links.
+const NOT_A_PAGE = new Set(["scanning", "assets"]);
 
 export function Breadcrumbs() {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
-
   if (segments.length === 0) return null;
 
   return (
-    <nav className="flex items-center gap-1 text-sm" aria-label="Breadcrumb">
+    <nav className="flex min-w-0 items-center gap-1 text-[13.5px]" aria-label="Breadcrumb">
       {segments.map((seg, i) => {
         const href = "/" + segments.slice(0, i + 1).join("/");
-        const label = segmentLabels[seg] ?? seg;
+        // Unknown segments are record ids (e.g. a repository).
+        const label = LABELS[seg] ?? (segments[i - 1] === "repositories" ? "Repository" : seg);
         const isLast = i === segments.length - 1;
-
         return (
-          <span key={href} className="flex items-center gap-1">
-            {i > 0 && (
-              <ChevronRight size={13} style={{ color: "var(--color-ink-faint)" }} />
-            )}
+          <span key={href} className="flex min-w-0 items-center gap-1">
+            {i > 0 && <ChevronRight size={14} className="shrink-0 text-faint" />}
             {isLast ? (
-              <span style={{ color: "var(--color-ink)", fontWeight: 500 }}>{label}</span>
+              <span aria-current="page" className="truncate font-medium text-ink">
+                {label}
+              </span>
+            ) : NOT_A_PAGE.has(seg) ? (
+              <span className="hidden truncate text-muted sm:inline">{label}</span>
             ) : (
-              <Link
-                href={href}
-                className="transition-colors"
-                style={{ color: "var(--color-ink-muted)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-ink)")}
-                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-ink-muted)")}
-              >
+              <Link href={href} className="truncate text-muted transition-colors hover:text-ink">
                 {label}
               </Link>
             )}

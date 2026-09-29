@@ -4,13 +4,7 @@ export type Severity = "Critical" | "High" | "Moderate" | "Low" | "Compliant";
 export type ScanStatus = "Completed" | "Running" | "Failed" | "Queued";
 export type Trigger = "INITIAL" | "PUSH" | "MANUAL";
 export type PqcSafety = "Yes" | "No" | "Medium" | "Upgrade to PQC";
-export type CryptoKind =
-  | "Algorithm"
-  | "Certificate"
-  | "Key"
-  | "Protocol"
-  | "Library"
-  | "Secret";
+export type CryptoKind = "Algorithm" | "Certificate" | "Key" | "Protocol" | "Library" | "Secret";
 
 // ─── Repository ───────────────────────────────────────────────────────────────
 
@@ -28,6 +22,8 @@ export interface Repository {
   criticality: "Critical" | "High" | "Medium" | "Low";
   lastScanAt: string | null;
   lastScanStatus: ScanStatus | null;
+  /** Where the code comes from; GitHub when absent (older sample data). */
+  sourceType?: "GITHUB" | "AWS";
 }
 
 // ─── Scan ─────────────────────────────────────────────────────────────────────
@@ -45,19 +41,6 @@ export interface Scan {
   startedAt: string;
   completedAt: string | null;
   profileName: string;
-}
-
-// ─── ScanProfile ──────────────────────────────────────────────────────────────
-
-export interface ScanProfile {
-  id: string;
-  name: string;
-  rulePackIds: string[];
-  includeGlobs: string[];
-  excludeGlobs: string[];
-  maxFileSizeKb: number;
-  createdAt: string;
-  isDefault: boolean;
 }
 
 // ─── CryptoAsset ──────────────────────────────────────────────────────────────
@@ -109,7 +92,10 @@ export interface Finding {
 // ─── Dashboard aggregates ─────────────────────────────────────────────────────
 
 export interface DashboardAggregates {
-  quantumReadinessScore: number;
+  /** Average post-quantum safety (0–10) of scored algorithms, keys and certificates; null until something is scored. */
+  quantumReadinessScore: number | null;
+  /** How many assets the readiness score averages. */
+  quantumReadinessBasis: number;
   cryptographicAssetsCount: number;
   repositoriesScanned: number;
   vulnerableAssetsPercent: number;

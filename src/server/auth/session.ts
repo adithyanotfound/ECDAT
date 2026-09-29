@@ -3,6 +3,7 @@
  * No auth library. Cookie is httpOnly, SameSite=Lax, Secure in production.
  */
 import { SignJWT, jwtVerify } from "jose";
+import { cookies } from "next/headers";
 
 const COOKIE_NAME = "session";
 const ALG = "HS256";
@@ -30,9 +31,7 @@ export async function createSessionToken(payload: SessionPayload): Promise<strin
     .sign(getSecret());
 }
 
-export async function verifySessionToken(
-  token: string
-): Promise<SessionPayload | null> {
+export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
   try {
     const { payload } = await jwtVerify(token, getSecret(), { algorithms: [ALG] });
     return payload as unknown as SessionPayload;
@@ -48,7 +47,8 @@ export function makeSessionCookie(token: string): string {
 }
 
 export function clearSessionCookie(): string {
-  return `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
 }
 
 export function getTokenFromCookieHeader(cookieHeader: string | null): string | null {
@@ -57,12 +57,11 @@ export function getTokenFromCookieHeader(cookieHeader: string | null): string | 
   return match ? match.trim().slice(COOKIE_NAME.length + 1) : null;
 }
 
-import { cookies } from 'next/headers';
 export async function requireSession(): Promise<SessionPayload> {
   const cookieStore = await cookies();
-  const token = cookieStore.get('session')?.value;
-  if (!token) throw new Error('Unauthorized');
+  const token = cookieStore.get(COOKIE_NAME)?.value;
+  if (!token) throw new Error("Unauthorized");
   const session = await verifySessionToken(token);
-  if (!session) throw new Error('Unauthorized');
+  if (!session) throw new Error("Unauthorized");
   return session;
 }

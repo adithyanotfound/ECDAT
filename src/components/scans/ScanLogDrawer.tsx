@@ -1,7 +1,14 @@
 "use client";
 
+/**
+ * A scan, opened: its live log (streamed over SSE while it runs) and what
+ * changed compared with the previous scan.
+ */
 import { useEffect, useRef, useState } from "react";
-import { X, Terminal, CheckCircle2, XCircle, Loader2, GitCompare } from "lucide-react";
+import { CheckCircle2, GitCompare, Loader2, Terminal, XCircle } from "lucide-react";
+import { Drawer } from "@/components/ui/Drawer";
+import { Tabs } from "@/components/ui/Tabs";
+import { Badge } from "@/components/ui/Pill";
 import { ScanDiffPanel } from "./ScanDiffPanel";
 
 interface LogEntry {
@@ -14,245 +21,143 @@ interface LogEntry {
 interface ScanLogDrawerProps {
   scanId: string | null;
   onClose: () => void;
+  title?: string;
 }
 
-const levelColor: Record<string, string> = {
-  DEBUG: "var(--color-ink-faint)",
-  INFO: "var(--color-ink-muted)",
-  WARN: "var(--color-stat-amber)",
-  ERROR: "var(--color-critical)",
+const LEVEL: Record<LogEntry["level"], { tag: string; color: string }> = {
+  DEBUG: { tag: "debug", color: "#8b8f97" },
+  INFO: { tag: "info ", color: "#8fc3a0" },
+  WARN: { tag: "warn ", color: "#e3b95a" },
+  ERROR: { tag: "error", color: "#f08a8a" },
 };
 
-const levelPrefix: Record<string, string> = {
-  DEBUG: "[DBG]",
-  INFO: "[INF]",
-  WARN: "[WRN]",
-  ERROR: "[ERR]",
-};
+type StreamState = "streaming" | "done" | "failed" | "lost" | "idle";
 
-export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
+export function ScanLogDrawer({ scanId, onClose, title = "Scan details" }: ScanLogDrawerProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [status, setStatus] = useState<"streaming" | "done" | "failed" | "idle">("idle");
+  const [status, setStatus] = useState<StreamState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"logs" | "changes">("logs");
+  const [tab, setTab] = useState("logs");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    setActiveTab("logs");
-    setErrorMessage(null);
-  }, [scanId]);
-
-  useEffect(() => {
-    if (!scanId) {
-      setLogs([]);
-      setStatus("idle");
-      return;
-    }
-
+    if (!scanId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset for the newly opened scan
     setLogs([]);
     setStatus("streaming");
+    setErrorMessage(null);
+    setTab("logs");
 
     const es = new EventSource(`/api/scans/${scanId}/logs/stream`);
-    esRef.current = es;
-
     const handleLog = (data: string) => {
       const entry = JSON.parse(data) as LogEntry;
-      setLogs((prev) => prev.some(l => l.id === entry.id) ? prev : [...prev, entry]);
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-      }, 50);
+      setLogs((prev) => (prev.some((l) => l.id === entry.id) ? prev : [...prev, entry]));
+      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
     };
-
     es.onmessage = (e) => handleLog(e.data);
     es.addEventListener("log", (e) => handleLog((e as MessageEvent).data));
-
     es.addEventListener("done", (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { status: string; errorMessage?: string };
       setStatus(data.status === "FAILED" ? "failed" : "done");
-      if (data.errorMessage) {
-        setErrorMessage(data.errorMessage);
-      }
+      if (data.errorMessage) setErrorMessage(data.errorMessage);
       es.close();
     });
-
-    es.addEventListener("heartbeat", () => {
-      // Connection alive, do nothing
+    es.addEventListener("timeout", () => {
+      setStatus("lost");
+      es.close();
     });
-
+    // A dropped connection isn't a failed scan; say so honestly.
     es.onerror = () => {
-      setStatus("failed");
+      setStatus((s) => (s === "streaming" ? "lost" : s));
       es.close();
     };
-
-    return () => {
-      es.close();
-    };
+    return () => es.close();
   }, [scanId]);
 
-  if (!scanId) return null;
+  const state = {
+    streaming: (
+      <Badge tone="low" pulse>
+        Running
+      </Badge>
+    ),
+    done: <Badge tone="safe">Completed</Badge>,
+    failed: <Badge tone="critical">Failed</Badge>,
+    lost: <Badge tone="neutral">Live view paused</Badge>,
+    idle: null,
+  }[status];
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{ backgroundColor: "rgba(0,0,0,0.5)", backdropFilter: "blur(2px)" }}
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div
-        className="fixed inset-4 md:inset-12 z-50 flex flex-col rounded-xl overflow-hidden shadow-2xl"
-        style={{
-          backgroundColor: "var(--color-surface)",
-          border: "1px solid var(--color-border)",
-        }}
+    <Drawer
+      open={!!scanId}
+      onClose={onClose}
+      title={title}
+      eyebrow={state}
+      subtitle={scanId ? <span className="font-mono">Scan {scanId.slice(-8)}</span> : undefined}
+      width="820px"
+    >
+      <Tabs
+        active={tab}
+        onChange={setTab}
+        stripClassName="px-6"
+        tabs={[
+          { id: "logs", label: "What happened", icon: <Terminal size={14} /> },
+          { id: "changes", label: "What changed", icon: <GitCompare size={14} /> },
+        ]}
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-          style={{ borderBottom: "1px solid var(--color-border)" }}
-        >
-          <div className="flex items-center gap-3">
-            <Terminal size={16} style={{ color: "var(--color-accent)" }} />
-            <div>
-              <p className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>
-                Scan Logs
-              </p>
-              <p className="text-xs font-mono mt-0.5" style={{ color: "var(--color-ink-faint)" }}>
-                {scanId.slice(0, 8)}…
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {status === "streaming" && (
-              <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-accent)" }}>
-                <Loader2 size={12} className="animate-spin" />
-                Live
-              </div>
-            )}
-            {status === "done" && (
-              <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-safe)" }}>
-                <CheckCircle2 size={12} />
-                Completed
-              </div>
-            )}
-            {status === "failed" && (
-              <div className="flex items-center gap-1.5 text-xs" style={{ color: "var(--color-critical)" }}>
-                <XCircle size={12} />
-                Failed
-              </div>
-            )}
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg"
-              style={{
-                backgroundColor: "var(--color-surface-2)",
-                color: "var(--color-ink-muted)",
-              }}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-
-        {/* Tab strip */}
-        <div className="flex items-center gap-1 px-4 pt-2 flex-shrink-0" style={{ borderBottom: "1px solid var(--color-border)" }}>
-          {([
-            { id: "logs" as const, label: "Logs", icon: Terminal },
-            { id: "changes" as const, label: "Changes", icon: GitCompare },
-          ]).map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-              style={{
-                color: activeTab === tab.id ? "var(--color-accent)" : "var(--color-ink-muted)",
-                borderBottom: activeTab === tab.id ? "2px solid var(--color-accent)" : "2px solid transparent",
-              }}
-            >
-              <tab.icon size={12} /> {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {activeTab === "changes" && <ScanDiffPanel scanId={scanId} />}
-
-        {/* Log output */}
-        <div
-          hidden={activeTab !== "logs"}
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto p-4 font-mono"
-          style={{
-            fontSize: "13px",
-            lineHeight: "1.6",
-            backgroundColor: "#0d1117",
-            color: "#e6edf3",
-          }}
-        >
-          {logs.length === 0 && status === "streaming" && (
-            <div
-              className="flex items-center gap-2 text-xs"
-              style={{ color: "#7d8590" }}
-            >
-              <Loader2 size={12} className="animate-spin" />
-              Waiting for logs…
-            </div>
-          )}
-          {logs.map((log) => (
-            <div key={log.id} className="flex flex-row items-start gap-3 mb-1">
-              <span style={{ color: "#7d8590", flexShrink: 0 }}>
-                {new Date(log.ts).toLocaleTimeString("en-US", {
-                  hour12: false,
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}
-              </span>
-              <span
-                style={{ 
-                  color: log.level === "ERROR" ? "#f85149" : log.level === "WARN" ? "#d29922" : log.level === "DEBUG" ? "#7d8590" : "#3fb950", 
-                  flexShrink: 0,
-                  width: "45px"
-                }}
+        {(active) =>
+          active === "changes" && scanId ? (
+            <ScanDiffPanel scanId={scanId} />
+          ) : (
+            <div className="p-6">
+              <div
+                ref={scrollRef}
+                className="h-[min(60vh,560px)] overflow-y-auto rounded-xl bg-charcoal p-4 font-mono text-[12.5px] leading-relaxed text-on-dark"
               >
-                {levelPrefix[log.level] ?? log.level}
-              </span>
-              <span style={{ wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
-                {log.message}
-              </span>
+                {logs.length === 0 && status === "streaming" && (
+                  <p className="flex items-center gap-2 text-on-dark-muted">
+                    <Loader2 size={13} className="animate-spin" /> Waiting for the scanner to start…
+                  </p>
+                )}
+                {logs.map((log) => {
+                  const lv = LEVEL[log.level] ?? LEVEL.INFO;
+                  return (
+                    <div key={log.id} className="flex gap-3">
+                      <span className="shrink-0 text-white/35">
+                        {new Date(log.ts).toLocaleTimeString("en-GB", { hour12: false })}
+                      </span>
+                      <span className="w-10 shrink-0" style={{ color: lv.color }}>
+                        {lv.tag}
+                      </span>
+                      <span className="break-words whitespace-pre-wrap">{log.message}</span>
+                    </div>
+                  );
+                })}
+                {status === "done" && (
+                  <p className="mt-4 flex items-center gap-2 border-t border-white/10 pt-3 text-[#8fc3a0]">
+                    <CheckCircle2 size={14} /> Finished. {logs.length} log lines.
+                  </p>
+                )}
+                {status === "failed" && (
+                  <div className="mt-4 border-t border-white/10 pt-3 text-[#f08a8a]">
+                    <p className="flex items-center gap-2">
+                      <XCircle size={14} /> The scan failed.
+                    </p>
+                    {errorMessage && (
+                      <p className="mt-2 font-sans text-[13px] whitespace-pre-wrap text-on-dark">{errorMessage}</p>
+                    )}
+                  </div>
+                )}
+                {status === "lost" && (
+                  <p className="mt-4 border-t border-white/10 pt-3 font-sans text-[13px] text-on-dark-muted">
+                    The live connection closed. The scan may still be running; reopen this panel to pick up where it
+                    left off.
+                  </p>
+                )}
+              </div>
             </div>
-          ))}
-          {status === "done" && (
-            <div
-              className="mt-4 pt-4 text-xs font-semibold"
-              style={{
-                color: "#3fb950",
-                borderTop: "1px solid #30363d",
-              }}
-            >
-              ✓ Scan completed — {logs.length} log entries
-            </div>
-          )}
-          {status === "failed" && (
-            <div
-              className="mt-4 pt-4 text-xs font-semibold"
-              style={{
-                color: "#f85149",
-                borderTop: "1px solid #30363d",
-              }}
-            >
-              <div className="mb-1">✕ Scan failed</div>
-              {errorMessage && (
-                <div className="opacity-90 mt-2 whitespace-pre-wrap font-sans text-sm font-normal text-[#e6edf3]">
-                  {errorMessage}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </>
+          )
+        }
+      </Tabs>
+    </Drawer>
   );
 }

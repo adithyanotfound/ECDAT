@@ -1,8 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Search, ChevronLeft, ChevronRight, Lightbulb } from "lucide-react";
+/**
+ * Recommendations: what to replace, with what, and how much work it is.
+ * Each row reads as "from → to" first; expanding it shows the standard,
+ * the performance and size impact, and notes.
+ */
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, ChevronDown, Gauge, HardDrive, Lightbulb, X } from "lucide-react";
+import { PageHeader } from "@/components/ui/Card";
+import { FilterChips, Pagination, SearchInput } from "@/components/ui/Controls";
+import { Badge, EffortPill } from "@/components/ui/Pill";
+import { EmptyState, Notice, SkeletonBlock } from "@/components/ui/States";
 import { StatCard } from "@/components/ui/StatCard";
+import { EFFORT } from "@/lib/tones";
+import { cn } from "@/lib/cn";
 
 interface Recommendation {
   id: string;
@@ -17,29 +29,8 @@ interface Recommendation {
   notes: string | null;
 }
 
+type Effort = Recommendation["effort"];
 const PAGE_SIZE = 10;
-
-function EffortBadge({ effort }: { effort: "HIGH" | "MEDIUM" | "LOW" }) {
-  const colors = {
-    HIGH: { c: "#F0516B", bg: "rgba(240,81,107,0.12)", border: "rgba(240,81,107,0.4)" },
-    MEDIUM: { c: "#F2C14E", bg: "rgba(242,193,78,0.12)", border: "rgba(242,193,78,0.4)" },
-    LOW: { c: "#3FCF8E", bg: "rgba(63,207,142,0.12)", border: "rgba(63,207,142,0.4)" },
-  };
-  const style = colors[effort] || colors.MEDIUM;
-
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-semibold"
-      style={{
-        color: style.c,
-        backgroundColor: style.bg,
-        border: `1px solid ${style.border}`,
-      }}
-    >
-      {effort}
-    </span>
-  );
-}
 
 export default function RecommendationsPage() {
   const [items, setItems] = useState<Recommendation[]>([]);
@@ -47,186 +38,213 @@ export default function RecommendationsPage() {
   const [stats, setStats] = useState({ total: 0, high: 0, medium: 0, low: 0 });
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [effort, setEffort] = useState<Effort | "">("");
+  const [repositoryId, setRepositoryId] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState<string | null>(null);
 
-  const fetchPage = useCallback(async (p: number, q: string) => {
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- reading the URL once on mount */
+    const p = new URLSearchParams(window.location.search);
+    setRepositoryId(p.get("repositoryId"));
+    const q = p.get("search") ?? "";
+    setSearch(q);
+    setDebounced(q);
+    setReady(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebounced(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const fetchPage = useCallback(async () => {
+    if (!ready) return;
     setLoading(true);
     try {
       const url = new URL("/api/recommendations", window.location.origin);
-      url.searchParams.set("page", String(p));
+      url.searchParams.set("page", String(page));
       url.searchParams.set("pageSize", String(PAGE_SIZE));
       url.searchParams.set("sort", "effort");
-      if (q) url.searchParams.set("search", q);
-      const res = await fetch(url.toString());
-      const data = await res.json();
+      if (debounced) url.searchParams.set("search", debounced);
+      if (effort) url.searchParams.set("effort", effort);
+      if (repositoryId) url.searchParams.set("repositoryId", repositoryId);
+      const data = await (await fetch(url.toString())).json();
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
       setStats(data.stats ?? { total: 0, high: 0, medium: 0, low: 0 });
+    } catch {
+      setItems([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ready, page, debounced, effort, repositoryId]);
 
-  useEffect(() => { fetchPage(page, search); }, [page, fetchPage]);
   useEffect(() => {
-    const id = setTimeout(() => { setPage(1); fetchPage(1, search); }, 300);
-    return () => clearTimeout(id);
-  }, [search, fetchPage]);
+    fetchPage();
+  }, [fetchPage]);
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-
-  const thStyle: React.CSSProperties = {
-    textAlign: "left",
-    padding: "10px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    color: "var(--color-ink-muted)",
-    backgroundColor: "var(--color-thead)",
-    borderBottom: "1px solid var(--color-border)",
-    whiteSpace: "nowrap",
+  const pick = (e: Effort | "") => {
+    setEffort(e);
+    setPage(1);
   };
-  const tdStyle: React.CSSProperties = {
-    padding: "12px 14px",
-    fontSize: "13px",
-    borderBottom: "1px solid var(--color-border)",
-    verticalAlign: "top",
-  };
-
-  const kpiCards = [
-    { label: "Total Recommendations", value: stats.total, sub: "Across all repositories", color: "var(--color-accent)" },
-    { label: "High Effort", value: stats.high, sub: "Requires significant refactoring", color: "var(--color-critical)" },
-    { label: "Medium Effort", value: stats.medium, sub: "Standard migration path", color: "var(--color-moderate)" },
-    { label: "Low Effort", value: stats.low, sub: "Drop-in or config change", color: "var(--color-safe)" },
-  ];
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
-      {/* KPI tiles */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        {kpiCards.map((card) => (
-          <StatCard
-            key={card.label}
-            title={card.label}
-            value={loading ? "—" : card.value}
-            subtitle={card.sub}
-            accentColor={card.color}
-          />
-        ))}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Understand & fix"
+        title="Recommendations"
+        description="What to replace each weak algorithm with, the standard behind it, and roughly how much work the change is. Start with the low-effort ones: they're quick wins."
+      />
+
+      {repositoryId && (
+        <Notice
+          tone="gold"
+          action={
+            <Link
+              href="/assets/recommendations"
+              onClick={() => setRepositoryId(null)}
+              className="inline-flex items-center gap-1 font-semibold hover:underline"
+            >
+              <X size={14} /> Show all
+            </Link>
+          }
+        >
+          Showing recommendations for <b>{items[0]?.repositoryFullName ?? "one repository"}</b>.
+        </Notice>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="All recommendations"
+          value={stats.total}
+          subtitle="Across the repositories shown"
+          term="recommendation"
+          tone="gold"
+        />
+        <StatCard title="Low effort" value={stats.low} subtitle={EFFORT.LOW.plain} term="effort" tone="safe" />
+        <StatCard
+          title="Medium effort"
+          value={stats.medium}
+          subtitle={EFFORT.MEDIUM.plain}
+          term="effort"
+          tone="moderate"
+        />
+        <StatCard title="High effort" value={stats.high} subtitle={EFFORT.HIGH.plain} term="effort" tone="critical" />
+      </section>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <FilterChips
+          label="Effort"
+          value={effort}
+          onChange={pick}
+          allLabel="Any effort"
+          allCount={stats.total}
+          options={[
+            { value: "LOW", label: "Low effort", tone: "safe", count: stats.low },
+            { value: "MEDIUM", label: "Medium", tone: "moderate", count: stats.medium },
+            { value: "HIGH", label: "High", tone: "critical", count: stats.high },
+          ]}
+        />
+        <SearchInput value={search} onChange={setSearch} placeholder="Search algorithm or repository" />
       </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-xl font-bold flex items-center gap-2" style={{ color: "var(--color-ink)" }}>
-          <Lightbulb size={24} style={{ color: "var(--color-accent)" }} />
-          Remediation Recommendations
-          <span className="ml-2 text-sm font-normal" style={{ color: "var(--color-ink-faint)" }}>
-            ({total} total)
-          </span>
-        </h1>
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2"
-            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", width: "240px" }}
-          >
-            <Search size={14} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
-            <input
-              type="text"
-              placeholder="Search recommendations..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--color-ink)" }}
-            />
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        {loading ? (
+          <div className="space-y-3 p-5">
+            {[0, 1, 2, 3].map((i) => (
+              <SkeletonBlock key={i} className="h-14" />
+            ))}
           </div>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-        <table className="w-full">
-          <thead>
-            <tr>
-              {["Algorithm", "Migration Target", "Standard", "Effort", "Impact", "Repository"].map((h) => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading
-              ? Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <tr key={i}>
-                    {Array.from({ length: 6 }).map((_, j) => (
-                      <td key={j} style={tdStyle}>
-                        <div className="rounded animate-pulse" style={{ height: "14px", width: "80px", backgroundColor: "var(--color-surface-2)" }} />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              : items.map((rec) => (
-                  <tr
-                    key={rec.id}
-                    style={{ backgroundColor: "var(--color-surface)", transition: "background-color 0.1s" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface-2)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface)")}
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={<Lightbulb size={22} />}
+            title={debounced || effort ? "Nothing matches" : "No recommendations yet"}
+          >
+            {debounced || effort
+              ? "Try another search or effort level."
+              : "Recommendations appear once a scan finds cryptography worth replacing."}
+          </EmptyState>
+        ) : (
+          <ul className="divide-y divide-line">
+            {items.map((rec) => {
+              const expanded = open === rec.id;
+              return (
+                <li key={rec.id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(expanded ? null : rec.id)}
+                    aria-expanded={expanded}
+                    className="flex w-full flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4 text-left transition-colors hover:bg-surface-2/50"
                   >
-                    <td style={tdStyle}>
-                      <span className="font-medium text-sm" style={{ color: "var(--color-critical)" }}>{rec.fromAlgorithm}</span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span className="font-semibold text-sm" style={{ color: "var(--color-safe)" }}>{rec.toAlgorithm}</span>
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+                      <span className="rounded-lg bg-critical-tint px-2.5 py-1 font-mono text-[13px] font-medium text-critical-ink">
+                        {rec.fromAlgorithm}
+                      </span>
+                      <ArrowRight size={16} className="text-faint" />
+                      <span className="rounded-lg bg-safe-tint px-2.5 py-1 font-mono text-[13px] font-medium text-safe-ink">
+                        {rec.toAlgorithm}
+                      </span>
+                      {rec.standard && <Badge dot={false}>{rec.standard}</Badge>}
+                    </span>
+                    <span className="hidden max-w-[240px] truncate text-[13px] text-muted md:block">
+                      {rec.repositoryFullName}
+                    </span>
+                    <EffortPill effort={rec.effort} />
+                    <ChevronDown
+                      size={17}
+                      className={cn("text-muted transition-transform", expanded && "rotate-180")}
+                    />
+                  </button>
+                  {expanded && (
+                    <div className="grid gap-4 border-t border-line bg-surface-2/40 px-5 py-4 animate-fade-in md:grid-cols-3">
+                      <Impact icon={<Gauge size={15} />} label="Speed impact" value={rec.latencyImpact} />
+                      <Impact icon={<HardDrive size={15} />} label="Size impact" value={rec.sizeImpact} />
+                      <div>
+                        <p className="text-[12.5px] font-semibold text-ink-2">How much work</p>
+                        <p className="mt-1 text-[13.5px] text-ink-2">{EFFORT[rec.effort]?.plain}</p>
+                      </div>
                       {rec.notes && (
-                        <p className="text-xs mt-1" style={{ color: "var(--color-ink-muted)", maxWidth: "240px" }}>
+                        <p className="text-[13.5px] leading-relaxed text-ink-2 md:col-span-3">
+                          <b className="font-semibold text-ink">Notes: </b>
                           {rec.notes}
                         </p>
                       )}
-                    </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-ink)" }}>{rec.standard ?? "—"}</span>
-                    </td>
-                    <td style={tdStyle}>
-                      <EffortBadge effort={rec.effort} />
-                    </td>
-                    <td style={tdStyle}>
-                      <div className="flex flex-col gap-1 text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                        <div><span style={{ color: "var(--color-ink-faint)" }}>Latency:</span> {rec.latencyImpact ?? "Unknown"}</div>
-                        <div><span style={{ color: "var(--color-ink-faint)" }}>Size:</span> {rec.sizeImpact ?? "Unknown"}</div>
-                      </div>
-                    </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-accent)" }}>{rec.repositoryFullName}</span>
-                    </td>
-                  </tr>
-                ))}
-            {items.length === 0 && !loading && (
-              <tr>
-                <td colSpan={6} className="py-12 text-center text-sm" style={{ color: "var(--color-ink-faint)" }}>
-                  No recommendations found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                      <p className="text-[13px] md:col-span-3">
+                        <Link
+                          href={`/scanning/repositories/${rec.repositoryId}`}
+                          className="font-medium text-gold-ink hover:underline"
+                        >
+                          Open {rec.repositoryFullName} →
+                        </Link>
+                      </p>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-          Showing {Math.min((page - 1) * PAGE_SIZE + 1, total)}–{Math.min(page * PAGE_SIZE, total)} of {total} rows
-        </p>
-        <div className="flex items-center gap-2">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
-            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}>
-            <ChevronLeft size={14} /> Prev
-          </button>
-          <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{page} / {totalPages || 1}</span>
-          <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
-            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-ink-muted)" }}>
-            Next <ChevronRight size={14} />
-          </button>
-        </div>
-      </div>
+      <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} noun="recommendations" />
+    </div>
+  );
+}
+
+function Impact({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | null }) {
+  return (
+    <div>
+      <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-2">
+        {icon} {label}
+      </p>
+      <p className="mt-1 text-[13.5px] text-ink-2">{value ?? "Not measured"}</p>
     </div>
   );
 }

@@ -1,119 +1,204 @@
-"use client";
+/**
+ * The dashboard's second layer: where the risk sits. Plain HTML bars instead
+ * of a charting library, so they're crisp, light and readable without
+ * hovering: every bar carries its number, and each coloured segment also
+ * names itself on hover.
+ *
+ * Colour follows meaning (severity tones), never position, and every
+ * severity is also written out in the legend.
+ */
+import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
+import { Card, CardHeader } from "@/components/ui/Card";
+import { TONE, type Tone } from "@/lib/tones";
+import type { AssetByType, KeyDistribution, PostureBreakdown, VulnBySource } from "@/fixtures/types";
 
-import dynamic from "next/dynamic";
-import type { VulnBySource, PostureBreakdown, AssetByType } from "@/fixtures/types";
+const SEVERITIES: { key: keyof Omit<VulnBySource, "source">; label: string; tone: Tone }[] = [
+  { key: "critical", label: "Critical", tone: "critical" },
+  { key: "high", label: "High", tone: "high" },
+  { key: "moderate", label: "Moderate", tone: "moderate" },
+  { key: "low", label: "Low", tone: "low" },
+];
 
-const StackedBar = dynamic(
-  () => import("@/components/charts/StackedBar").then((m) => m.StackedBar),
-  { ssr: false, loading: () => <Skeleton h={240} /> }
-);
-const PostureDonut = dynamic(
-  () => import("@/components/charts/PostureDonut").then((m) => m.PostureDonut),
-  { ssr: false, loading: () => <Skeleton h={200} /> }
-);
-const TypeBars = dynamic(
-  () => import("@/components/charts/TypeBars").then((m) => m.TypeBars),
-  { ssr: false, loading: () => <Skeleton h={220} /> }
-);
-const KeyDistributionDonut = dynamic(
-  () => import("@/components/charts/KeyDistributionDonut").then((m) => m.KeyDistributionDonut),
-  { ssr: false, loading: () => <Skeleton h={150} /> }
-);
-
-function Skeleton({ h }: { h: number }) {
+function Legend({ items }: { items: { label: string; tone: Tone }[] }) {
   return (
-    <div
-      className="rounded-lg"
-      style={{ height: h, backgroundColor: "var(--color-surface-2)", animation: "pulse 2s infinite" }}
-    />
+    <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12.5px] text-muted">
+      {items.map((i) => (
+        <li key={i.label} className="flex items-center gap-1.5">
+          <span className="size-2.5 rounded-sm" style={{ backgroundColor: TONE[i.tone].fill }} />
+          {i.label}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+// ─── Risk posture: one 100% bar, then the same numbers as a readable list ────
+
+const POSTURE: { key: keyof PostureBreakdown; label: string; tone: Tone; meaning: string }[] = [
+  { key: "high", label: "High risk", tone: "critical", meaning: "Fix first" },
+  { key: "medium", label: "Moderate", tone: "moderate", meaning: "Plan a fix" },
+  { key: "low", label: "Low", tone: "low", meaning: "Keep an eye on" },
+  { key: "compliant", label: "Safe", tone: "safe", meaning: "Nothing to do" },
+];
+
+export function PostureCard({ data }: { data: PostureBreakdown }) {
+  const total = POSTURE.reduce((s, p) => s + data[p.key], 0);
   return (
-    <div
-      className="rounded-xl p-5"
-      style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}
-    >
-      <div className="mb-4">
-        <p className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>{title}</p>
-        {subtitle && (
-          <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-faint)" }}>{subtitle}</p>
+    <Card>
+      <CardHeader
+        title="How risky is what we found?"
+        subtitle="Every asset sorted by its risk score"
+        term="crsf"
+        action={
+          <Link
+            href="/assets/pqc"
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-gold-ink hover:underline"
+          >
+            Inventory <ArrowUpRight size={14} />
+          </Link>
+        }
+      />
+      <div className="p-5">
+        {total === 0 ? (
+          <p className="py-6 text-center text-[13.5px] text-muted">No assets scored yet.</p>
+        ) : (
+          <>
+            <div className="flex h-4 gap-[2px] overflow-hidden rounded-full">
+              {POSTURE.filter((p) => data[p.key] > 0).map((p) => (
+                <div
+                  key={p.key}
+                  title={`${p.label}: ${data[p.key]}%`}
+                  className="h-full first:rounded-l-full last:rounded-r-full"
+                  style={{ width: `${(data[p.key] / total) * 100}%`, backgroundColor: TONE[p.tone].fill }}
+                />
+              ))}
+            </div>
+            <ul className="mt-5 grid grid-cols-2 gap-3">
+              {POSTURE.map((p) => (
+                <li key={p.key} className="rounded-xl border border-line px-3.5 py-3">
+                  <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: TONE[p.tone].fill }} />
+                    {p.label}
+                  </p>
+                  <p className="num mt-1 text-xl font-semibold text-ink">{data[p.key]}%</p>
+                  <p className="text-xs text-muted">{p.meaning}</p>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
-      {children}
-    </div>
+    </Card>
   );
 }
 
-function SectionHeader({ title }: { title: string }) {
+// ─── Open problems by where they were found ───────────────────────────────────
+
+export function SourceCard({ data }: { data: VulnBySource[] }) {
+  const rows = data.map((d) => ({ ...d, total: d.critical + d.high + d.moderate + d.low }));
+  const max = Math.max(1, ...rows.map((r) => r.total));
+  const any = rows.some((r) => r.total > 0);
   return (
-    <h2 className="text-sm font-semibold uppercase tracking-wide" style={{ color: "var(--color-ink-muted)" }}>
-      {title}
-    </h2>
+    <Card>
+      <CardHeader
+        title="Where are the problems?"
+        subtitle="Open vulnerabilities by the kind of file they were found in"
+        term="severity"
+        action={
+          <Link
+            href="/assets/vulnerabilities"
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-gold-ink hover:underline"
+          >
+            All issues <ArrowUpRight size={14} />
+          </Link>
+        }
+      />
+      <div className="p-5">
+        {!any ? (
+          <p className="py-6 text-center text-[13.5px] text-muted">No open vulnerabilities. Nice.</p>
+        ) : (
+          <>
+            <Legend items={SEVERITIES} />
+            <ul className="mt-4 space-y-3">
+              {[...rows]
+                .sort((a, b) => b.total - a.total)
+                .map((r) => (
+                  <li key={r.source} className="grid grid-cols-[104px_1fr_32px] items-center gap-3">
+                    <span className={`truncate text-[13px] ${r.total ? "text-ink-2" : "text-faint"}`}>{r.source}</span>
+                    <div className="h-3 overflow-hidden rounded-full bg-sunken/60">
+                      <div className="flex h-full gap-[2px]" style={{ width: `${(r.total / max) * 100}%` }}>
+                        {SEVERITIES.filter((s) => r[s.key] > 0).map((s) => (
+                          <div
+                            key={s.key}
+                            title={`${r.source}: ${r[s.key]} ${s.label.toLowerCase()}`}
+                            className="h-full first:rounded-l-full last:rounded-r-full"
+                            style={{ flexGrow: r[s.key], backgroundColor: TONE[s.tone].fill }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <span className="num text-right text-[13px] font-semibold text-ink">{r.total || "–"}</span>
+                  </li>
+                ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 
-interface DashboardChartsProps {
-  vulnerabilitiesBySource: VulnBySource[];
-  cryptographicPosture: PostureBreakdown;
-  assetsByType: AssetByType[];
-  symmetricKeyDistribution: { name: string; percent: number }[];
-  asymmetricKeyDistribution: { name: string; percent: number }[];
-}
+// ─── Ranked single-series bars (asset kinds, algorithm mix) ───────────────────
 
-export function DashboardCharts({
-  vulnerabilitiesBySource,
-  cryptographicPosture,
-  assetsByType,
-  symmetricKeyDistribution,
-  asymmetricKeyDistribution,
-}: DashboardChartsProps) {
+export function RankedBarsCard({
+  title,
+  subtitle,
+  rows,
+  suffix = "",
+  empty,
+  tone = "gold",
+}: {
+  title: string;
+  subtitle: string;
+  rows: { label: string; value: number }[];
+  suffix?: string;
+  empty: string;
+  tone?: Tone;
+}) {
+  const max = Math.max(1, ...rows.map((r) => r.value));
   return (
-    <div className="flex flex-col gap-6">
-      {/* Vulnerabilities section */}
-      <div className="flex flex-col gap-3">
-        <SectionHeader title="Vulnerabilities" />
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <Card
-            title="Issues by Source"
-            subtitle="Where security weaknesses were found in your code"
-          >
-            <StackedBar data={vulnerabilitiesBySource} />
-          </Card>
-          <Card
-            title="Security Posture"
-            subtitle="Risk distribution of all cryptographic assets"
-          >
-            <PostureDonut data={cryptographicPosture} />
-          </Card>
-        </div>
+    <Card>
+      <CardHeader title={title} subtitle={subtitle} />
+      <div className="p-5">
+        {rows.length === 0 ? (
+          <p className="py-6 text-center text-[13.5px] text-muted">{empty}</p>
+        ) : (
+          <ul className="space-y-3">
+            {rows.map((r) => (
+              <li key={r.label} className="grid grid-cols-[minmax(0,130px)_1fr_48px] items-center gap-3">
+                <span className="truncate font-mono text-[12.5px] text-ink-2" title={r.label}>
+                  {r.label}
+                </span>
+                <div className="h-2.5 overflow-hidden rounded-full bg-sunken/60">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${(r.value / max) * 100}%`, backgroundColor: TONE[tone].fill }}
+                    title={`${r.label}: ${r.value}${suffix}`}
+                  />
+                </div>
+                <span className="num text-right text-[13px] font-semibold text-ink">
+                  {r.value}
+                  {suffix}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-
-      {/* Crypto assets section */}
-      <div className="flex flex-col gap-3">
-        <SectionHeader title="Cryptographic Assets" />
-        <Card
-          title="Asset Types"
-          subtitle="Kinds of cryptographic objects discovered"
-        >
-          <TypeBars data={assetsByType} />
-        </Card>
-        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <Card
-            title="Symmetric Keys"
-            subtitle="Secret key algorithms used for data encryption"
-          >
-            <KeyDistributionDonut data={symmetricKeyDistribution} />
-          </Card>
-          <Card
-            title="Asymmetric Keys"
-            subtitle="Public/private key pairs for signing and key exchange"
-          >
-            <KeyDistributionDonut data={asymmetricKeyDistribution} />
-          </Card>
-        </div>
-      </div>
-    </div>
+    </Card>
   );
 }
+
+export const assetRows = (d: AssetByType[]) => d.map((a) => ({ label: a.type, value: a.count }));
+export const keyRows = (d: KeyDistribution[]) => d.map((k) => ({ label: k.name, value: k.percent }));

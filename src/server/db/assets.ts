@@ -60,7 +60,7 @@ export async function getInventoryPage({
   page = 1,
   pageSize = 10,
   search,
-  sort = "lastDiscovered",
+  // `sort` is accepted for API compatibility; inventory rows are ordered by last update.
   dir = "desc",
 }: InventoryPageParams = {}): Promise<InventoryPage> {
   const session = await requireSession();
@@ -103,7 +103,7 @@ export async function getInventoryPage({
     }),
   ]);
 
-  const items: InventoryAsset[] = repos.map((r, i) => ({
+  const items: InventoryAsset[] = repos.map((r) => ({
     id: r.id,
     assetId: `Asset-${r.id.slice(-4).toUpperCase()}`,
     lastDiscovered: r.updatedAt.toISOString(),
@@ -195,7 +195,7 @@ export async function getCryptoAssetsPage({
     return {
       id: a.id,
       repositoryId: a.repositoryId,
-      repositoryFullName: (a as any).repository?.fullName,
+      repositoryFullName: a.repository?.fullName,
       kind: mapKind(a.kind),
       name: a.name,
       primitive: a.primitive ?? undefined,

@@ -1,53 +1,91 @@
 "use client";
 
-import { useState, useEffect } from "react";
+/**
+ * Repositories: everything being watched. Layer 1 is a count of what's
+ * connected and whether scans are healthy; layer 2 the list; clicking a name
+ * opens that repository's own page with its findings and history.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import {
+  ChevronDown,
+  Cloud,
+  FolderGit2,
+  GitBranch,
+  Loader2,
+  Play,
+  PlugZap,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+import { GithubIcon } from "@/components/ui/icons";
 import type { Repository } from "@/fixtures/types";
-import { StatusPill } from "@/components/ui/Pill";
-import { X } from "lucide-react";
-import { Search, Plus, ExternalLink, RefreshCw, Play, Link2, GitBranch, Cloud, Trash2 } from "lucide-react";
-import { formatRelativeTime, truncateHash } from "@/lib/format";
+import { PageHeader } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { FilterChips, SearchInput } from "@/components/ui/Controls";
+import { StatusPill, Badge } from "@/components/ui/Pill";
+import { EmptyState, Notice, SkeletonRows } from "@/components/ui/States";
+import { StatCard } from "@/components/ui/StatCard";
+import { Modal } from "@/components/ui/Drawer";
+import { InfoHint } from "@/components/ui/InfoHint";
+import { Toast, type ToastMessage } from "@/components/ui/Toast";
+import { AddGithubRepoDialog, ConnectAwsDialog } from "@/components/repos/ConnectDialogs";
+import { formatRelativeTime, isCommitSha, truncateHash } from "@/lib/format";
+import type { Tone } from "@/lib/tones";
 
-const GITHUB_APP_SLUG = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "ecdat-atlas";
+const APP_SLUG = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "ecdat-atlas";
 
-const CRITICALITY_COLORS: Record<string, string> = {
-  Critical: "#F0516B",
-  High:     "#F79552",
-  Medium:   "#F2C14E",
-  Low:      "#3FCF8E",
+const CRITICALITY_TONE: Record<Repository["criticality"], Tone> = {
+  Critical: "critical",
+  High: "high",
+  Medium: "moderate",
+  Low: "safe",
 };
 
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 14px",
-  fontSize: "12px",
-  fontWeight: 600,
-  color: "var(--color-ink-muted)",
-  backgroundColor: "var(--color-thead)",
-  borderBottom: "1px solid var(--color-border)",
-  whiteSpace: "nowrap",
+// Messages for the redirect GitHub sends back after installing the App.
+const REDIRECT_NOTICE: Record<string, { tone: Tone; title: string; body: string }> = {
+  connected: {
+    tone: "safe",
+    title: "GitHub App connected",
+    body: "Your repositories are being added and their first scans have started.",
+  },
+  uninstalled: {
+    tone: "neutral",
+    title: "GitHub App removed",
+    body: "Scanning is paused for repositories that came from that installation.",
+  },
+  setup_failed: {
+    tone: "critical",
+    title: "The GitHub App couldn't be connected",
+    body: "Check the App ID and private key on the server, then try installing again.",
+  },
+  missing_installation: {
+    tone: "critical",
+    title: "GitHub didn't say which installation to use",
+    body: "Start the install again from the Add menu.",
+  },
 };
 
-const tdStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  fontSize: "13px",
-  borderBottom: "1px solid var(--color-border)",
-  verticalAlign: "middle",
-};
+type SourceFilter = "GITHUB" | "AWS";
 
 export default function RepositoriesPage() {
-  const [query, setQuery] = useState("");
   const [repos, setRepos] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState<SourceFilter | "">("");
   const [scanning, setScanning] = useState<Record<string, boolean>>({});
-  const [scanAlert, setScanAlert] = useState<{ scanId: string, repoId: string } | null>(null);
-  const [awsModalOpen, setAwsModalOpen] = useState(false);
-  const [awsForm, setAwsForm] = useState({ name: "", accessKeyId: "", secretAccessKey: "", region: "us-east-1" });
-  const [awsLoading, setAwsLoading] = useState(false);
-  const [awsError, setAwsError] = useState("");
-  const [repoToDelete, setRepoToDelete] = useState<{ id: string, name: string } | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dialog, setDialog] = useState<"github" | "aws" | null>(null);
+  const [toDelete, setToDelete] = useState<Repository | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [redirectNotice, setRedirectNotice] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const toastSeq = useRef(0);
+  const [syncing, setSyncing] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const r = await fetch("/api/repositories");
       const data = await r.json();
@@ -57,448 +95,403 @@ export default function RepositoriesPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => { load(); }, []);
-  useEffect(() => {
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
   }, []);
 
-  const triggerScan = async (repoId: string) => {
-    setScanning((s) => ({ ...s, [repoId]: true }));
-    try {
-      const res = await fetch(`/api/repositories/${repoId}/scan`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setScanAlert({ scanId: data.scanId, repoId });
-        load();
-      }
-    } catch {
-      // ignore
-    } finally {
-      setScanning((s) => ({ ...s, [repoId]: false }));
-    }
-  };
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, [load]);
 
-  const connectAws = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAwsLoading(true);
-    setAwsError("");
+  // ?connected=1, ?uninstalled=1 or ?error=… after the GitHub App round trip.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const key = p.get("error") ?? (p.has("connected") ? "connected" : p.has("uninstalled") ? "uninstalled" : null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading the URL once on mount
+    if (key && REDIRECT_NOTICE[key]) setRedirectNotice(key);
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => !menuRef.current?.contains(e.target as Node) && setMenuOpen(false);
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  const notify = (t: Omit<ToastMessage, "id">) => setToast({ ...t, id: ++toastSeq.current });
+
+  const triggerScan = async (repo: Repository) => {
+    setScanning((s) => ({ ...s, [repo.id]: true }));
     try {
-      const res = await fetch("/api/repositories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceType: "AWS",
-          ...awsForm
-        })
+      const res = await fetch(`/api/repositories/${repo.id}/scan`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "The scan couldn't start.");
+      notify({
+        tone: "success",
+        title: data.alreadyRunning ? "A scan is already running" : "Scan started",
+        body: repo.fullName,
+        action: { label: "Watch the live log", href: `/scanning/scans?scan=${data.scanId}` },
       });
-      if (res.ok) {
-        setAwsModalOpen(false);
-        setAwsForm({ name: "", accessKeyId: "", secretAccessKey: "", region: "us-east-1" });
-        load();
-      } else {
-        const err = await res.json();
-        setAwsError(err.error || "Failed to connect AWS account");
-      }
-    } catch (e) {
-      setAwsError("Network error. Please try again.");
+      load();
+    } catch (err) {
+      notify({ tone: "error", title: "Scan didn't start", body: err instanceof Error ? err.message : String(err) });
     } finally {
-      setAwsLoading(false);
+      setScanning((s) => ({ ...s, [repo.id]: false }));
     }
   };
 
   const confirmDelete = async () => {
-    if (!repoToDelete) return;
-    setDeleteLoading(true);
-    
+    if (!toDelete) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`/api/repositories/${repoToDelete.id}`, { method: "DELETE" });
-      if (res.ok) {
-        setRepoToDelete(null);
-        load();
-      } else {
-        alert("Failed to delete repository.");
-      }
-    } catch (e) {
-      alert("Network error while deleting.");
+      const res = await fetch(`/api/repositories/${toDelete.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Delete failed.");
+      notify({ tone: "success", title: "Removed", body: `${toDelete.fullName} and everything found in it.` });
+      setToDelete(null);
+      load();
+    } catch (err) {
+      notify({ tone: "error", title: "Couldn't remove it", body: err instanceof Error ? err.message : String(err) });
     } finally {
-      setDeleteLoading(false);
+      setDeleting(false);
     }
   };
 
-  const filtered = repos.filter((r) =>
-    r.fullName.toLowerCase().includes(query.toLowerCase())
+  // Pull in this App's installations on the user's GitHub account, in case
+  // GitHub's post-install redirect or a webhook never reached ECDAT.
+  const syncWithGithub = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/github/sync", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Syncing with GitHub didn't work.");
+      if (data.installations === 0) {
+        notify({
+          tone: "error",
+          title: "The GitHub App isn't installed on your account",
+          body: "Install it and choose which repositories ECDAT Atlas can read, then sync again.",
+          action: { label: "Install the GitHub App", href: `https://github.com/apps/${APP_SLUG}/installations/new` },
+        });
+      } else {
+        const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+        notify({
+          tone: "success",
+          title: data.added ? `Added ${count(data.added, "repository", "repositories")}` : "Everything is up to date",
+          body: `${count(data.repositories, "repository", "repositories")} shared with the App${
+            data.scansStarted ? `; ${count(data.scansStarted, "first scan", "first scans")} started` : ""
+          }.`,
+          action: data.scansStarted ? { label: "Watch the scans", href: "/scanning/scans" } : undefined,
+        });
+      }
+      load();
+    } catch (err) {
+      notify({ tone: "error", title: "Sync didn't work", body: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const onAdded = (_id: string, scanId?: string) => {
+    notify({
+      tone: "success",
+      title: scanId ? "Added, and the first scan has started" : "Added",
+      body: "Results appear here in a minute or two.",
+      action: scanId ? { label: "Watch the live log", href: `/scanning/scans?scan=${scanId}` } : undefined,
+    });
+    load();
+  };
+
+  const sourceOf = (r: Repository): SourceFilter => (r.sourceType === "AWS" ? "AWS" : "GITHUB");
+  const filtered = repos.filter(
+    (r) => r.fullName.toLowerCase().includes(query.toLowerCase()) && (!source || sourceOf(r) === source),
   );
+  const counts = {
+    total: repos.length,
+    scanned: repos.filter((r) => r.lastScanStatus === "Completed").length,
+    active: repos.filter((r) => r.lastScanStatus === "Running" || r.lastScanStatus === "Queued").length,
+    failed: repos.filter((r) => r.lastScanStatus === "Failed").length,
+    aws: repos.filter((r) => sourceOf(r) === "AWS").length,
+  };
+  const notice = redirectNotice ? REDIRECT_NOTICE[redirectNotice] : null;
 
   return (
-    <>
-      <div className="flex flex-col gap-6 animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <h1 className="text-xl font-bold" style={{ color: "var(--color-ink)" }}>
-              Repositories
-            </h1>
-            <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-muted)" }}>
-            Connected repositories being monitored for cryptographic issues
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={load}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-            }}
-          >
-            <RefreshCw size={13} /> Refresh
-          </button>
-          <button
-            onClick={() => setAwsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
-            style={{ color: "var(--color-ink)" }}
-          >
-            <Cloud size={14} /> Connect AWS
-          </button>
-          <a
-            href={`https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium no-underline"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            <Plus size={14} /> Add Repository
-          </a>
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2"
-            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", width: "220px" }}
-          >
-            <Search size={14} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
-            <input
-              type="text"
-              placeholder="Search repositories..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--color-ink)", caretColor: "var(--color-accent)" }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Connect banner */}
-
-      {/* Table */}
-      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--color-border)" }}>
-        <table className="w-full">
-          <thead>
-            <tr>
-              <th style={thStyle}>Repository</th>
-              <th style={thStyle}>Branch</th>
-              <th style={thStyle}>Language</th>
-              <th style={thStyle}>Criticality</th>
-              <th style={thStyle}>Last Scan</th>
-              <th style={thStyle}>Status</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading
-              ? Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>
-                    {Array.from({ length: 7 }).map((_, j) => (
-                      <td key={j} style={tdStyle}>
-                        <div
-                          className="rounded animate-pulse"
-                          style={{ height: "14px", width: j === 0 ? "160px" : "70px", backgroundColor: "var(--color-surface-2)" }}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              : filtered.map((repo) => (
-                  <tr
-                    key={repo.id}
-                    style={{ backgroundColor: "var(--color-surface)" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface-2)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--color-surface)")}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Connect & scan"
+        title="Repositories"
+        description="The code and cloud accounts ECDAT Atlas watches. Each one is scanned when it's added, whenever you press Scan now, and on every push if it came through the GitHub App."
+        actions={
+          <>
+            <Button onClick={load} aria-label="Refresh">
+              <RefreshCw size={15} /> Refresh
+            </Button>
+            <Button
+              onClick={syncWithGithub}
+              disabled={syncing}
+              title="Bring in every repository you've shared with the GitHub App"
+            >
+              {syncing ? <Loader2 size={15} className="animate-spin" /> : <GithubIcon size={15} />}
+              {syncing ? "Syncing…" : "Sync with GitHub"}
+            </Button>
+            <div ref={menuRef} className="relative">
+              <Button variant="primary" onClick={() => setMenuOpen((o) => !o)} aria-expanded={menuOpen}>
+                <Plus size={16} /> Add <ChevronDown size={14} className="opacity-70" />
+              </Button>
+              {menuOpen && (
+                <div className="absolute right-0 z-40 mt-2 w-72 overflow-hidden rounded-2xl border border-line bg-surface p-1.5 shadow-pop animate-pop-in">
+                  {[
+                    {
+                      icon: <GithubIcon size={17} />,
+                      title: "Public GitHub repository",
+                      body: "By name; nothing to install",
+                      onClick: () => setDialog("github"),
+                    },
+                    {
+                      icon: <Cloud size={17} />,
+                      title: "AWS account",
+                      body: "KMS keys, ACM certificates, code",
+                      onClick: () => setDialog("aws"),
+                    },
+                  ].map((o) => (
+                    <button
+                      key={o.title}
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        o.onClick();
+                      }}
+                      className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-surface-2"
+                    >
+                      <span className="mt-0.5 text-gold-ink">{o.icon}</span>
+                      <span>
+                        <span className="block text-[13.5px] font-medium text-ink">{o.title}</span>
+                        <span className="block text-xs text-muted">{o.body}</span>
+                      </span>
+                    </button>
+                  ))}
+                  <a
+                    href={`https://github.com/apps/${APP_SLUG}/installations/new`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-start gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-surface-2"
                   >
-                    {/* Repo name */}
-                    <td style={tdStyle}>
-                      <div className="flex items-center gap-2">
-                        {repo.sourceType === "AWS" ? (
-                          <Cloud size={13} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
-                        ) : (
-                          <GitBranch size={13} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
-                        )}
-                        <div>
-                          <a 
-                            href={`/scanning/repositories/${repo.id}`} 
-                            className="font-medium text-sm hover:underline block" 
-                            style={{ color: "var(--color-accent)" }}
-                          >
-                            {repo.name}
-                          </a>
-                          <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-                            {repo.fullName}
-                          </p>
+                    <span className="mt-0.5 text-gold-ink">
+                      <PlugZap size={17} />
+                    </span>
+                    <span>
+                      <span className="block text-[13.5px] font-medium text-ink">Install the GitHub App</span>
+                      <span className="block text-xs text-muted">Private repos, and a scan on every push</span>
+                    </span>
+                  </a>
+                </div>
+              )}
+            </div>
+          </>
+        }
+      />
+
+      {notice && (
+        <Notice tone={notice.tone} title={notice.title}>
+          {notice.body}
+        </Notice>
+      )}
+
+      {/* Layer 1: the state of things */}
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="Connected"
+          value={loading ? "–" : counts.total}
+          subtitle={`${counts.aws} AWS, ${counts.total - counts.aws} GitHub`}
+          tone="gold"
+        />
+        <StatCard title="Scanned" value={loading ? "–" : counts.scanned} subtitle="Last scan finished" tone="safe" />
+        <StatCard title="Scanning now" value={loading ? "–" : counts.active} subtitle="Waiting or running" tone="low" />
+        <StatCard
+          title="Last scan failed"
+          value={loading ? "–" : counts.failed}
+          subtitle={counts.failed ? "Open Scans to read the log" : "None failing"}
+          tone={counts.failed ? "critical" : "neutral"}
+          href={counts.failed ? "/scanning/scans" : undefined}
+        />
+      </section>
+
+      {/* Layer 2: the list */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <FilterChips
+          label="Source"
+          value={source}
+          onChange={setSource}
+          allCount={repos.length}
+          options={[
+            { value: "GITHUB", label: "GitHub", count: counts.total - counts.aws },
+            { value: "AWS", label: "AWS", count: counts.aws },
+          ]}
+        />
+        <SearchInput value={query} onChange={setQuery} placeholder="Search repositories" />
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line bg-surface-2/70 text-left text-[12.5px] text-muted">
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Repository
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Branch
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    Importance <InfoHint label="Importance" term="criticality" />
+                  </span>
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Last scan
+                </th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows rows={5} cols={5} />
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>
+                    {repos.length === 0 ? (
+                      <EmptyState
+                        icon={<FolderGit2 size={22} />}
+                        title="Nothing connected yet"
+                        action={
+                          <>
+                            <Button variant="primary" onClick={() => setDialog("github")}>
+                              <GithubIcon size={16} /> Add a public repository
+                            </Button>
+                            <Button onClick={() => setDialog("aws")}>
+                              <Cloud size={16} /> Connect AWS
+                            </Button>
+                            <Button onClick={syncWithGithub} disabled={syncing}>
+                              <GithubIcon size={16} /> {syncing ? "Syncing…" : "Sync with GitHub"}
+                            </Button>
+                          </>
+                        }
+                      >
+                        Add a repository or an AWS account and its first scan starts straight away.
+                      </EmptyState>
+                    ) : (
+                      <EmptyState title="No matches">Nothing matches your search or filter.</EmptyState>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((repo) => {
+                  const aws = sourceOf(repo) === "AWS";
+                  return (
+                    <tr
+                      key={repo.id}
+                      className="border-b border-line transition-colors last:border-0 hover:bg-surface-2/50"
+                    >
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-ink-2">
+                            {aws ? <Cloud size={16} /> : <GitBranch size={16} />}
+                          </span>
+                          <div className="min-w-0">
+                            <Link
+                              href={`/scanning/repositories/${repo.id}`}
+                              className="block truncate font-semibold text-ink hover:text-gold-ink hover:underline"
+                            >
+                              {repo.name}
+                            </Link>
+                            <p className="truncate text-xs text-muted">
+                              {repo.fullName}
+                              {repo.language && repo.language !== "Unknown" && ` · ${repo.language}`}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-
-                    {/* Branch + commit */}
-                    <td style={tdStyle}>
-                      <p className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                        {repo.defaultBranch}
-                      </p>
-                      <p className="text-xs font-mono" style={{ color: "var(--color-ink-faint)" }}>
-                        {truncateHash(repo.lastCommitSha)}
-                      </p>
-                    </td>
-
-                    {/* Language */}
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                        {repo.language ?? "—"}
-                      </span>
-                    </td>
-
-                    {/* Criticality */}
-                    <td style={tdStyle}>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: CRITICALITY_COLORS[repo.criticality] ?? "#888" }}
-                        />
-                        <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                          {repo.criticality}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Last scan */}
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-                        {repo.lastScanAt ? formatRelativeTime(repo.lastScanAt) : "Never"}
-                      </span>
-                    </td>
-
-                    {/* Status */}
-                    <td style={tdStyle}>
-                      {repo.lastScanStatus
-                        ? <StatusPill status={repo.lastScanStatus} />
-                        : <span className="text-xs" style={{ color: "var(--color-ink-faint)" }}>—</span>
-                      }
-                    </td>
-
-                    {/* Actions */}
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => triggerScan(repo.id)}
-                          disabled={scanning[repo.id]}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
-                          style={{
-                            backgroundColor: "rgba(47,91,255,0.08)",
-                            color: "var(--color-accent)",
-                            border: "1px solid rgba(47,91,255,0.2)",
-                          }}
-                        >
-                          <Play size={11} fill="currentColor" />
-                          {scanning[repo.id] ? "Queuing…" : "Scan Now"}
-                        </button>
-                        <button
-                          onClick={() => setRepoToDelete({ id: repo.id, name: repo.fullName })}
-                          className="p-1.5 rounded hover:bg-red-50 text-[var(--color-ink-muted)] hover:text-red-500 transition-colors"
-                          title="Delete Repository"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-            }
-          </tbody>
-        </table>
-
-        {!loading && filtered.length === 0 && (
-          <div className="flex flex-col items-center py-16 gap-2">
-            <Link2 size={32} style={{ color: "var(--color-ink-faint)" }} />
-            <p className="text-sm" style={{ color: "var(--color-ink-muted)" }}>
-              No repositories found.{" "}
-              <a
-                href={`https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--color-accent)" }}
-              >
-                Install the GitHub App
-              </a>{" "}
-              to add your first repository.
-            </p>
-          </div>
-        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <p className="text-[13px] text-ink-2">{repo.defaultBranch}</p>
+                        {isCommitSha(repo.lastCommitSha) && (
+                          <p className="font-mono text-xs text-muted">{truncateHash(repo.lastCommitSha)}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <Badge tone={CRITICALITY_TONE[repo.criticality] ?? "neutral"}>{repo.criticality}</Badge>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex flex-col items-start gap-1">
+                          {repo.lastScanStatus ? (
+                            <StatusPill status={repo.lastScanStatus} />
+                          ) : (
+                            <Badge>Not scanned</Badge>
+                          )}
+                          <span className="text-xs text-muted">
+                            {repo.lastScanAt ? formatRelativeTime(repo.lastScanAt) : "Never"}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button size="sm" onClick={() => triggerScan(repo)} disabled={scanning[repo.id]}>
+                            {scanning[repo.id] ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                            {scanning[repo.id] ? "Starting…" : "Scan now"}
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={() => setToDelete(repo)}
+                            aria-label={`Remove ${repo.fullName}`}
+                            title="Remove"
+                            className="flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-critical-tint hover:text-critical-ink"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-
-      <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-        Showing {filtered.length} of {repos.length} repositories · Auto-refreshes every 5s
-      </p>
-
-      </div>
-
-      {scanAlert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-in fade-in duration-200">
-          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-2xl p-6 w-full max-w-md relative">
-            <button onClick={() => setScanAlert(null)} className="absolute top-4 right-4 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]">
-              <X size={18} />
-            </button>
-            <h3 className="text-lg font-bold text-[var(--color-ink)] mb-2">Scan Queued!</h3>
-            <p className="text-sm text-[var(--color-ink-muted)] mb-4">
-              Your cryptographic scan has been successfully triggered.
-            </p>
-            <div className="bg-[var(--color-surface-2)] rounded p-3 mb-6 border border-[var(--color-border)]">
-              <p className="text-xs font-mono text-[var(--color-ink)]">Scan ID: {scanAlert.scanId}</p>
-            </div>
-            <div className="flex items-center justify-end gap-3">
-              <button 
-                onClick={() => setScanAlert(null)}
-                className="px-4 py-2 rounded-lg text-sm font-medium border border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-              >
-                OK
-              </button>
-              <a 
-                href="/scanning/scans"
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--color-accent)] text-white hover:opacity-90"
-              >
-                View Live Logs
-              </a>
-            </div>
-          </div>
-        </div>
+      {!loading && repos.length > 0 && (
+        <p className="text-[13px] text-muted">
+          Showing {filtered.length} of {repos.length}. This list refreshes every few seconds.
+        </p>
       )}
 
-      {awsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-in fade-in duration-200">
-          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-2xl p-6 w-full max-w-md relative">
-            <button onClick={() => setAwsModalOpen(false)} className="absolute top-4 right-4 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]">
-              <X size={18} />
-            </button>
-            <h3 className="text-lg font-bold text-[var(--color-ink)] mb-2 flex items-center gap-2">
-              <Cloud size={20} /> Connect AWS Account
-            </h3>
-            <p className="text-sm text-[var(--color-ink-muted)] mb-6">
-              Enter a read-only IAM user credentials to scan KMS and ACM assets.
-            </p>
-            
-            {awsError && (
-              <div className="mb-4 p-3 bg-red-50 text-red-600 border border-red-200 rounded text-sm">
-                {awsError}
-              </div>
-            )}
-            
-            <form onSubmit={connectAws} className="flex flex-col gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-ink-muted)] mb-1">Account Label</label>
-                <input 
-                  required
-                  type="text" 
-                  value={awsForm.name}
-                  onChange={e => setAwsForm({...awsForm, name: e.target.value})}
-                  placeholder="e.g. production-us-east-1"
-                  className="w-full px-3 py-2 bg-transparent border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]" 
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-ink-muted)] mb-1">Access Key ID</label>
-                <input 
-                  required
-                  type="text" 
-                  value={awsForm.accessKeyId}
-                  onChange={e => setAwsForm({...awsForm, accessKeyId: e.target.value})}
-                  className="w-full px-3 py-2 bg-transparent border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]" 
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-ink-muted)] mb-1">Secret Access Key</label>
-                <input 
-                  required
-                  type="password" 
-                  value={awsForm.secretAccessKey}
-                  onChange={e => setAwsForm({...awsForm, secretAccessKey: e.target.value})}
-                  className="w-full px-3 py-2 bg-transparent border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]" 
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[var(--color-ink-muted)] mb-1">Region</label>
-                <input 
-                  required
-                  type="text" 
-                  value={awsForm.region}
-                  onChange={e => setAwsForm({...awsForm, region: e.target.value})}
-                  className="w-full px-3 py-2 bg-transparent border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]" 
-                />
-              </div>
-              
-              <div className="flex justify-end gap-3 mt-4">
-                <button 
-                  type="button"
-                  onClick={() => setAwsModalOpen(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium border border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  disabled={awsLoading}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--color-accent)] text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {awsLoading ? "Connecting..." : "Connect"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddGithubRepoDialog open={dialog === "github"} onClose={() => setDialog(null)} onAdded={onAdded} />
+      <ConnectAwsDialog open={dialog === "aws"} onClose={() => setDialog(null)} onAdded={onAdded} />
 
-      {repoToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-in fade-in duration-200">
-          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-2xl p-6 w-full max-w-md relative">
-            <button onClick={() => setRepoToDelete(null)} className="absolute top-4 right-4 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]">
-              <X size={18} />
-            </button>
-            <h3 className="text-lg font-bold text-[var(--color-ink)] mb-2 flex items-center gap-2">
-              <Trash2 size={20} className="text-red-500" /> Delete Repository
-            </h3>
-            <p className="text-sm text-[var(--color-ink-muted)] mb-6">
-              Are you sure you want to delete repository <strong className="text-[var(--color-ink)]">'{repoToDelete.name}'</strong>? This will permanently delete all associated scans, assets, and findings. This action cannot be undone.
-            </p>
-            
-            <div className="flex justify-end gap-3 mt-4">
-              <button 
-                type="button"
-                onClick={() => setRepoToDelete(null)}
-                className="px-4 py-2 rounded-lg text-sm font-medium border border-[var(--color-border)] text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-                disabled={deleteLoading}
-              >
-                Cancel
-              </button>
-              <button 
-                type="button"
-                onClick={confirmDelete}
-                disabled={deleteLoading}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center gap-2"
-              >
-                {deleteLoading ? "Deleting..." : "Delete Permanently"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+      <Modal
+        open={!!toDelete}
+        onClose={() => !deleting && setToDelete(null)}
+        icon={<Trash2 size={19} />}
+        title={`Remove ${toDelete?.name ?? "repository"}?`}
+        description={
+          <>
+            This deletes <b className="text-ink">{toDelete?.fullName}</b> from ECDAT Atlas along with every scan, asset
+            and finding from it. Your code on GitHub or AWS isn&apos;t touched. This can&apos;t be undone.
+          </>
+        }
+        footer={
+          <>
+            <Button onClick={() => setToDelete(null)} disabled={deleting}>
+              Keep it
+            </Button>
+            <Button variant="danger" onClick={confirmDelete} disabled={deleting}>
+              {deleting && <Loader2 size={15} className="animate-spin" />}
+              {deleting ? "Removing…" : "Remove permanently"}
+            </Button>
+          </>
+        }
+      />
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
+    </div>
   );
 }

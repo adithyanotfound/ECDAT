@@ -18,6 +18,7 @@ export async function GET() {
   const cookieStore = await cookies();
   cookieStore.set("oauth_state", state, {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 600, // 10 minutes
     path: "/",
@@ -30,7 +31,5 @@ export async function GET() {
     state,
   });
 
-  return NextResponse.redirect(
-    `https://github.com/login/oauth/authorize?${params}`
-  );
+  return NextResponse.redirect(`https://github.com/login/oauth/authorize?${params}`);
 }

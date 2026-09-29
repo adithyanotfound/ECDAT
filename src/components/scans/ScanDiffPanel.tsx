@@ -1,7 +1,13 @@
 "use client";
 
+/**
+ * What changed since the previous scan: a one-line summary first, then the
+ * new and fixed problems, then new assets.
+ */
 import { useEffect, useState } from "react";
-import { Plus, Minus, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, Minus, Plus } from "lucide-react";
+import { SeverityPill } from "@/components/ui/Pill";
+import { TONE, riskBand, type SeverityLabel } from "@/lib/tones";
 
 interface DiffAssetRow {
   id: string;
@@ -32,13 +38,11 @@ interface ScanDiff {
   resolvedFindings: DiffFindingRow[];
 }
 
-const severityColor: Record<string, string> = {
-  CRITICAL: "#F0516B",
-  HIGH: "#F79552",
-  MODERATE: "#F2C14E",
-  LOW: "#5AA9F5",
-  SAFE: "#3FCF8E",
-  COMPLIANT: "#3FCF8E",
+const toLabel = (s: string): SeverityLabel => {
+  const v = s.charAt(0) + s.slice(1).toLowerCase();
+  return (
+    ["Critical", "High", "Moderate", "Low", "Compliant"].includes(v) ? v : v === "Safe" ? "Compliant" : "Low"
+  ) as SeverityLabel;
 };
 
 export function ScanDiffPanel({ scanId }: { scanId: string }) {
@@ -47,15 +51,13 @@ export function ScanDiffPanel({ scanId }: { scanId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset when a different scan is opened
     setLoading(true);
     fetch(`/api/scans/${scanId}/diff`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) setDiff(data);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => !cancelled && setDiff(data))
+      .catch(() => !cancelled && setDiff(null))
+      .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
@@ -63,112 +65,111 @@ export function ScanDiffPanel({ scanId }: { scanId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-xs p-4" style={{ color: "var(--color-ink-faint)" }}>
-        <Loader2 size={12} className="animate-spin" /> Loading change diff…
+      <div className="flex items-center gap-2 p-6 text-[13px] text-muted">
+        <Loader2 size={14} className="animate-spin" /> Comparing with the previous scan…
       </div>
     );
   }
-
-  if (!diff) {
-    return (
-      <div className="p-4 text-xs" style={{ color: "var(--color-ink-faint)" }}>
-        No diff data available for this scan.
-      </div>
-    );
-  }
-
+  if (!diff) return <p className="p-6 text-[13.5px] text-muted">There&apos;s no comparison for this scan yet.</p>;
   if (!diff.previousScanId) {
     return (
-      <div className="p-4 text-xs" style={{ color: "var(--color-ink-faint)" }}>
-        This is the first completed scan of this repository — no prior scan to diff against.
-      </div>
+      <p className="p-6 text-[13.5px] text-muted">
+        This is the first finished scan of this repository, so there&apos;s nothing earlier to compare with.
+      </p>
     );
   }
 
-  const summary = [
-    { label: "Assets introduced", value: diff.assetsIntroducedCount, color: "var(--color-safe)" },
-    { label: "Assets resolved", value: diff.assetsResolvedCount, color: "var(--color-ink-muted)" },
-    { label: "Assets unchanged", value: diff.assetsUnchangedCount, color: "var(--color-ink-faint)" },
-    { label: "Findings introduced", value: diff.findingsIntroducedCount, color: "var(--color-critical)" },
-    { label: "Findings resolved", value: diff.findingsResolvedCount, color: "var(--color-safe)" },
+  const nothing =
+    diff.introducedFindings.length === 0 && diff.resolvedFindings.length === 0 && diff.introducedAssets.length === 0;
+  const stats = [
+    { label: "New problems", value: diff.findingsIntroducedCount, tone: "critical" as const },
+    { label: "Problems fixed", value: diff.findingsResolvedCount, tone: "safe" as const },
+    { label: "New assets", value: diff.assetsIntroducedCount, tone: "gold" as const },
+    { label: "Assets removed", value: diff.assetsResolvedCount, tone: "neutral" as const },
   ];
 
   return (
-    <div className="p-4 flex flex-col gap-5 overflow-y-auto">
-      <div className="grid grid-cols-2 gap-2">
-        {summary.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-lg p-3"
-            style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}
-          >
-            <p className="text-lg font-bold tabular-nums" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-faint)" }}>{s.label}</p>
+    <div className="flex flex-col gap-6 p-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded-xl border border-line px-3.5 py-3">
+            <p className="num text-xl font-semibold text-ink">{s.value}</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+              <span className="size-2 rounded-full" style={{ backgroundColor: TONE[s.tone].fill }} />
+              {s.label}
+            </p>
           </div>
         ))}
       </div>
 
+      {nothing && (
+        <p className="flex items-center gap-2 text-[13.5px] text-safe-ink">
+          <CheckCircle2 size={16} /> Nothing changed since the previous scan; {diff.assetsUnchangedCount} assets are the
+          same.
+        </p>
+      )}
+
       {diff.introducedFindings.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "var(--color-ink)" }}>
-            <Plus size={12} style={{ color: "var(--color-critical)" }} /> New findings this scan
-          </p>
-          <div className="flex flex-col gap-1.5">
-            {diff.introducedFindings.map((f) => (
-              <div key={f.id} className="rounded-lg p-2.5 text-xs" style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium" style={{ color: "var(--color-ink)" }}>{f.title}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0" style={{ color: severityColor[f.severity], backgroundColor: `${severityColor[f.severity]}22` }}>
-                    {f.severity}
-                  </span>
-                </div>
-                <p className="mt-1 font-mono" style={{ color: "var(--color-ink-faint)" }}>{f.filePath ?? f.code}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+        <DiffList icon={<Plus size={14} className="text-critical" />} title="New problems in this scan">
+          {diff.introducedFindings.map((f) => (
+            <li
+              key={f.id}
+              className="flex items-start justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5"
+            >
+              <span className="min-w-0">
+                <span className="block text-[13.5px] font-medium text-ink">{f.title}</span>
+                <span className="block truncate font-mono text-xs text-muted">{f.filePath ?? f.code}</span>
+              </span>
+              <SeverityPill severity={toLabel(f.severity)} />
+            </li>
+          ))}
+        </DiffList>
       )}
 
       {diff.resolvedFindings.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "var(--color-ink)" }}>
-            <Minus size={12} style={{ color: "var(--color-safe)" }} /> Findings resolved since last scan
-          </p>
-          <div className="flex flex-col gap-1.5">
-            {diff.resolvedFindings.map((f) => (
-              <div key={f.id} className="rounded-lg p-2.5 text-xs opacity-70" style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}>
-                <span className="font-medium" style={{ color: "var(--color-ink)" }}>{f.title}</span>
-                <p className="mt-1 font-mono" style={{ color: "var(--color-ink-faint)" }}>{f.filePath ?? f.code}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+        <DiffList icon={<Minus size={14} className="text-safe" />} title="Fixed since the previous scan">
+          {diff.resolvedFindings.map((f) => (
+            <li key={f.id} className="rounded-xl border border-line bg-safe-tint/40 px-3.5 py-2.5">
+              <span className="block text-[13.5px] font-medium text-ink line-through decoration-safe/60">
+                {f.title}
+              </span>
+              <span className="block truncate font-mono text-xs text-muted">{f.filePath ?? f.code}</span>
+            </li>
+          ))}
+        </DiffList>
       )}
 
       {diff.introducedAssets.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "var(--color-ink)" }}>
-            <Plus size={12} style={{ color: "var(--color-accent)" }} /> New artefacts discovered
-          </p>
-          <div className="flex flex-col gap-1.5">
-            {diff.introducedAssets.slice(0, 25).map((a) => (
-              <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg p-2.5 text-xs" style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}>
-                <div className="min-w-0">
-                  <span className="font-medium" style={{ color: "var(--color-ink)" }}>{a.name}</span>
-                  <p className="font-mono truncate" style={{ color: "var(--color-ink-faint)" }}>{a.filePath}</p>
-                </div>
-                <span className="tabular-nums flex-shrink-0" style={{ color: severityColor[a.severity] }}>{a.crsfScore}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {diff.introducedFindings.length === 0 && diff.resolvedFindings.length === 0 && diff.introducedAssets.length === 0 && (
-        <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-          No changes detected since the previous scan — {diff.assetsUnchangedCount} artefacts confirmed unchanged.
-        </p>
+        <DiffList icon={<Plus size={14} className="text-gold-ink" />} title="New cryptography found">
+          {diff.introducedAssets.slice(0, 25).map((a) => {
+            const band = riskBand(a.crsfScore);
+            return (
+              <li
+                key={a.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] font-medium text-ink">{a.name}</span>
+                  <span className="block truncate font-mono text-xs text-muted">{a.filePath}</span>
+                </span>
+                <SeverityPill severity={band.label} />
+              </li>
+            );
+          })}
+        </DiffList>
       )}
     </div>
+  );
+}
+
+function DiffList({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2.5 flex items-center gap-1.5 text-[13.5px] font-semibold text-ink">
+        {icon}
+        {title}
+      </h3>
+      <ul className="flex flex-col gap-2">{children}</ul>
+    </section>
   );
 }

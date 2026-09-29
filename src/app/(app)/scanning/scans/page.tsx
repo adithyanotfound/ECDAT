@@ -1,295 +1,213 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import type { Scan } from "@/fixtures/types";
-import { StatusPill } from "@/components/ui/Pill";
-import { formatRelativeTime, truncateHash } from "@/lib/format";
-import { Search, ChevronLeft, ChevronRight, Terminal } from "lucide-react";
+/**
+ * Scans: every scan, newest first. Filter by result, then open one to watch
+ * its log live or see what changed since the one before. Opening
+ * /scanning/scans?scan=<id> jumps straight to that scan.
+ */
+import { useCallback, useEffect, useState } from "react";
+import { ChevronRight, Cpu } from "lucide-react";
+import type { Scan, ScanStatus } from "@/fixtures/types";
+import { PageHeader } from "@/components/ui/Card";
+import { FilterChips, Pagination, SearchInput } from "@/components/ui/Controls";
+import { Badge, StatusPill } from "@/components/ui/Pill";
+import { EmptyState, SkeletonRows } from "@/components/ui/States";
+import { InfoHint } from "@/components/ui/InfoHint";
 import { ScanLogDrawer } from "@/components/scans/ScanLogDrawer";
+import { formatRelativeTime, isCommitSha, truncateHash } from "@/lib/format";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
 
-function StatusTag({ text }: { text: string }) {
-  const color =
-    text === "Completed"
-      ? "#3FCF8E"
-      : text === "Running"
-      ? "#5AA9F5"
-      : text === "Failed"
-      ? "#F0516B"
-      : "var(--color-ink-muted)";
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full"
-      style={{
-        color,
-        backgroundColor: `${color}1a`,
-        border: `1px solid ${color}44`,
-      }}
-    >
-      {text}
-    </span>
-  );
-}
+const TRIGGER: Record<string, string> = { INITIAL: "First scan", PUSH: "New push", MANUAL: "Scan now" };
 
 export default function ScansPage() {
   const [scans, setScans] = useState<Scan[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [status, setStatus] = useState<ScanStatus | "">("");
   const [loading, setLoading] = useState(true);
-  const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Scan | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
-    async (p: number, q: string, background = false) => {
+    async (background = false) => {
       if (!background) setLoading(true);
       try {
         const url = new URL("/api/scans", window.location.origin);
-        url.searchParams.set("page", String(p));
+        url.searchParams.set("page", String(page));
         url.searchParams.set("pageSize", String(PAGE_SIZE));
-        if (q) url.searchParams.set("search", q);
+        if (debounced) url.searchParams.set("search", debounced);
+        if (status) url.searchParams.set("status", status);
         const res = await fetch(url.toString());
         const data = await res.json();
         setScans(data.items ?? []);
         setTotal(data.total ?? 0);
+      } catch {
+        if (!background) setScans([]);
       } finally {
         setLoading(false);
       }
     },
-    []
+    [page, debounced, status],
   );
 
   useEffect(() => {
-    fetchPage(page, search);
-  }, [page, fetchPage]);
+    fetchPage();
+    // Keep running scans fresh without flashing the table.
+    const id = setInterval(() => fetchPage(true), 5000);
+    return () => clearInterval(id);
+  }, [fetchPage]);
 
-  // Auto-polling for active scans
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchPage(page, search, true);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [page, search, fetchPage]);
-
-  // Debounce search
-  useEffect(() => {
-    const id = setTimeout(() => {
+    const t = setTimeout(() => {
+      setDebounced(search.trim());
       setPage(1);
-      fetchPage(1, search);
     }, 300);
-    return () => clearTimeout(id);
-  }, [search, fetchPage]);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
+  // ?scan=<id> opens that scan's drawer once.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("scan");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading the URL once on mount
+    if (id) setSelectedId(id);
+  }, []);
 
-  const thStyle: React.CSSProperties = {
-    textAlign: "left",
-    padding: "10px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    color: "var(--color-ink-muted)",
-    backgroundColor: "var(--color-thead)",
-    borderBottom: "1px solid var(--color-border)",
-    whiteSpace: "nowrap",
-  };
-  const tdStyle: React.CSSProperties = {
-    padding: "10px 14px",
-    fontSize: "13px",
-    borderBottom: "1px solid var(--color-border)",
-    verticalAlign: "middle",
+  const open = (s: Scan) => {
+    setSelected(s);
+    setSelectedId(s.id);
   };
 
   return (
-    <>
-      <div className="flex flex-col gap-6 animate-fade-in">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--color-ink)" }}>
-          Scans
-          <span
-            className="ml-2 text-sm font-normal"
-            style={{ color: "var(--color-ink-faint)" }}
-          >
-            ({total} total)
-          </span>
-        </h1>
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              width: "220px",
-            }}
-          >
-            <Search size={14} style={{ color: "var(--color-ink-faint)", flexShrink: 0 }} />
-            <input
-              type="text"
-              placeholder="Search scans..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--color-ink)" }}
-            />
-          </div>
-        </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Connect & scan"
+        title="Scans"
+        description="Each scan reads a repository or AWS account from top to bottom and records the cryptography it finds. Open one to follow it live or see what changed."
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <FilterChips
+          label="Result"
+          value={status}
+          onChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+          options={[
+            { value: "Running", label: "Running", tone: "low" },
+            { value: "Queued", label: "Waiting", tone: "neutral" },
+            { value: "Completed", label: "Completed", tone: "safe" },
+            { value: "Failed", label: "Failed", tone: "critical" },
+          ]}
+        />
+        <SearchInput value={search} onChange={setSearch} placeholder="Search by repository" />
       </div>
 
-      {/* Table */}
-      <div
-        className="rounded-xl overflow-hidden"
-        style={{ border: "1px solid var(--color-border)" }}
-      >
-        <table className="w-full">
-          <thead>
-            <tr>
-              {["Repository", "Trigger", "Status", "Commit", "Ref", "Files", "Duration", "Started", "Profile", ""].map((h) => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading
-              ? Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <tr key={i}>
-                    {Array.from({ length: 9 }).map((_, j) => (
-                      <td key={j} style={tdStyle}>
-                        <div
-                          className="rounded animate-pulse"
-                          style={{
-                            height: "14px",
-                            width: j === 0 ? "140px" : "60px",
-                            backgroundColor: "var(--color-surface-2)",
-                          }}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              : scans.map((scan) => (
+      <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-card">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line bg-surface-2/70 text-left text-[12.5px] text-muted">
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Repository
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Result
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    Started by <InfoHint label="Started by" term="trigger" />
+                  </span>
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Commit
+                </th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">
+                  Files
+                </th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">
+                  Took
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  When
+                </th>
+                <th scope="col" className="w-8 px-4 py-3">
+                  <span className="sr-only">Open</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <SkeletonRows rows={8} cols={8} />
+              ) : scans.length === 0 ? (
+                <tr>
+                  <td colSpan={8}>
+                    <EmptyState
+                      icon={<Cpu size={22} />}
+                      title={debounced || status ? "No matching scans" : "No scans yet"}
+                    >
+                      {debounced || status
+                        ? "Try a different filter or search."
+                        : "Scans start by themselves when you add a repository. You can also press Scan now on the Repositories page."}
+                    </EmptyState>
+                  </td>
+                </tr>
+              ) : (
+                scans.map((scan) => (
                   <tr
                     key={scan.id}
-                    style={{
-                      backgroundColor: "var(--color-surface)",
-                      transition: "background-color 0.1s",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.backgroundColor =
-                        "var(--color-surface-2)")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.backgroundColor =
-                        "var(--color-surface)")
-                    }
+                    tabIndex={0}
+                    onClick={() => open(scan)}
+                    onKeyDown={(e) => e.key === "Enter" && open(scan)}
+                    aria-label={`Open scan of ${scan.repositoryFullName}`}
+                    className="cursor-pointer border-b border-line transition-colors last:border-0 hover:bg-surface-2/60 focus-visible:bg-surface-2/60"
                   >
-                    <td style={tdStyle}>
-                      <span className="font-medium" style={{ color: "var(--color-ink)" }}>
-                        {scan.repositoryFullName}
-                      </span>
+                    <td className="max-w-[280px] px-4 py-3.5">
+                      <p className="truncate font-medium text-ink">{scan.repositoryFullName}</p>
+                      <p className="truncate text-xs text-muted">{scan.ref.replace("refs/heads/", "")}</p>
                     </td>
-                    <td style={tdStyle}>
-                      <span
-                        className="text-xs px-2 py-0.5 rounded-full"
-                        style={{
-                          backgroundColor: "var(--color-surface-2)",
-                          color: "var(--color-ink-muted)",
-                          border: "1px solid var(--color-border)",
-                        }}
-                      >
-                        {scan.trigger}
-                      </span>
-                    </td>
-                    <td style={tdStyle}>
+                    <td className="px-4 py-3.5">
                       <StatusPill status={scan.status} />
                     </td>
-                    <td style={tdStyle}>
-                      <span className="font-mono text-xs" style={{ color: "var(--color-ink-faint)" }}>
-                        {truncateHash(scan.commitSha)}
-                      </span>
+                    <td className="px-4 py-3.5">
+                      <Badge dot={false}>{TRIGGER[scan.trigger] ?? scan.trigger}</Badge>
                     </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs truncate" style={{ color: "var(--color-ink-muted)", maxWidth: "120px", display: "block" }}>
-                        {scan.ref.replace("refs/heads/", "")}
-                      </span>
+                    <td className="px-4 py-3.5 font-mono text-xs text-muted">
+                      {isCommitSha(scan.commitSha) ? truncateHash(scan.commitSha) : "–"}
                     </td>
-                    <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums", color: "var(--color-ink-muted)" }}>
-                      {scan.filesScanned ?? "—"}
+                    <td className="num px-4 py-3.5 text-right text-ink-2">
+                      {scan.filesScanned?.toLocaleString() ?? "–"}
                     </td>
-                    <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums", color: "var(--color-ink-muted)" }}>
-                      {scan.durationMs ? `${(scan.durationMs / 1000).toFixed(1)}s` : "—"}
+                    <td className="num px-4 py-3.5 text-right text-ink-2">
+                      {scan.durationMs ? `${(scan.durationMs / 1000).toFixed(1)}s` : "–"}
                     </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-                        {formatRelativeTime(scan.startedAt)}
-                      </span>
+                    <td className="px-4 py-3.5 text-[13px] whitespace-nowrap text-muted">
+                      {formatRelativeTime(scan.startedAt)}
                     </td>
-                    <td style={tdStyle}>
-                      <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-                        {scan.profileName}
-                      </span>
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <button
-                        onClick={() => setSelectedScanId(scan.id)}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-xs"
-                        style={{
-                          color: "var(--color-accent)",
-                          backgroundColor: "rgba(47,91,255,0.08)",
-                          border: "1px solid rgba(47,91,255,0.2)",
-                        }}
-                      >
-                        <Terminal size={11} /> Logs
-                      </button>
+                    <td className="px-4 py-3.5 text-faint">
+                      <ChevronRight size={16} />
                     </td>
                   </tr>
-                ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
-          Showing {Math.min((page - 1) * PAGE_SIZE + 1, total)}–
-          {Math.min(page * PAGE_SIZE, total)} of {total} scans
-        </p>
-        <div className="flex items-center gap-2">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-            }}
-          >
-            <ChevronLeft size={14} /> Prev
-          </button>
-          <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
-            {page} / {totalPages || 1}
-          </span>
-          <button
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm disabled:opacity-40"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-            }}
-          >
-            Next <ChevronRight size={14} />
-          </button>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      </div>
-      
-      {/* Live log drawer */}
+      <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} noun="scans" />
+
       <ScanLogDrawer
-        scanId={selectedScanId}
-        onClose={() => setSelectedScanId(null)}
+        scanId={selectedId}
+        title={selected ? selected.repositoryFullName : "Scan details"}
+        onClose={() => {
+          setSelected(null);
+          setSelectedId(null);
+        }}
       />
-    </>
+    </div>
   );
 }

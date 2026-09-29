@@ -10,22 +10,34 @@
  */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Vercel ends a response at maxDuration; the log drawer then offers to reopen.
+export const maxDuration = 300;
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
+import { ownedScanOr404, sessionOr401 } from "@/server/auth/guard";
 
 const POLL_MS = 1_500;
-const TIMEOUT_MS = 10 * 60 * 1_000; // max 10 minutes streaming
+// Max streaming time: 10 minutes self-hosted; on Vercel, end cleanly before maxDuration cuts it off.
+const TIMEOUT_MS = process.env.VERCEL ? 280_000 : 10 * 60 * 1_000;
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await sessionOr401();
+  if (session instanceof NextResponse) return session;
+
   const { id: scanId } = await params;
+  const owned = await ownedScanOr404(session, scanId).catch(() => null);
+  if (!owned) return NextResponse.json({ error: "DB unavailable" }, { status: 503 });
+  if (owned instanceof NextResponse) return owned;
 
   const encoder = new TextEncoder();
   let lastLogId: string | undefined = undefined;
   let closed = false;
+
+  // Stop polling the database as soon as the browser goes away.
+  req.signal.addEventListener("abort", () => {
+    closed = true;
+  });
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -33,9 +45,7 @@ export async function GET(
 
       const send = (event: string, data: unknown) => {
         if (closed) return;
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
       // Send initial heartbeat so the client knows the connection is alive
@@ -43,14 +53,16 @@ export async function GET(
 
       while (!closed && Date.now() < deadline) {
         // Fetch new log rows since last seen
-        const newLogs = await prisma.scanLog.findMany({
-          where: {
-            scanId,
-            ...(lastLogId ? { id: { gt: lastLogId } } : {}),
-          },
-          orderBy: { ts: "asc" },
-          take: 50,
-        }).catch(() => []);
+        const newLogs = await prisma.scanLog
+          .findMany({
+            where: {
+              scanId,
+              ...(lastLogId ? { id: { gt: lastLogId } } : {}),
+            },
+            orderBy: { ts: "asc" },
+            take: 50,
+          })
+          .catch(() => []);
 
         for (const log of newLogs) {
           send("log", { id: log.id, ts: log.ts, level: log.level, message: log.message });
@@ -58,10 +70,12 @@ export async function GET(
         }
 
         // Check if scan is done
-        const scan = await prisma.scan.findUnique({
-          where: { id: scanId },
-          select: { status: true, errorMessage: true },
-        }).catch(() => null);
+        const scan = await prisma.scan
+          .findUnique({
+            where: { id: scanId },
+            select: { status: true, errorMessage: true },
+          })
+          .catch(() => null);
 
         if (scan?.status === "COMPLETED" || scan?.status === "FAILED") {
           send("done", { status: scan.status, errorMessage: scan.errorMessage });
@@ -73,8 +87,10 @@ export async function GET(
         await new Promise((r) => setTimeout(r, POLL_MS));
       }
 
+      if (closed) return;
       // Timeout
-      send("timeout", { message: "Stream timed out after 10 minutes" });
+      send("timeout", { message: "Live stream closed; reopen to continue" });
+      closed = true;
       controller.close();
     },
     cancel() {

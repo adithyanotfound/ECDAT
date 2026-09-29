@@ -1,28 +1,20 @@
 /**
  * DELETE /api/repositories/[id]
- * Deletes a repository and all its associated assets, findings, and scans.
+ * Deletes one of the signed-in user's repositories and everything found in it.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
-import { requireSession } from "@/server/auth/session";
+import { ownedRepositoryOr404, sessionOr401 } from "@/server/auth/guard";
 
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    await requireSession();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await sessionOr401();
+  if (session instanceof NextResponse) return session;
 
   const { id } = await params;
 
   try {
-    const repo = await prisma.repository.findUnique({ where: { id } });
-    if (!repo) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
+    const repo = await ownedRepositoryOr404(session, id);
+    if (repo instanceof NextResponse) return repo;
 
     // Cascade delete in a transaction to satisfy foreign key constraints
     await prisma.$transaction([
@@ -39,7 +31,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("[delete-repo] error:", err);
+    console.error("[delete-repo] error:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "Failed to delete repository" }, { status: 500 });
   }
 }

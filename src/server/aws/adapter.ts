@@ -27,6 +27,9 @@ import { extract } from "tar-stream";
 import { Readable } from "stream";
 import type { Checkout } from "@/server/github/tarball";
 import type { AwsCredentials } from "./kms";
+import { safeJoin } from "@/server/security/paths";
+
+const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024; // same ceiling as GitHub tarballs
 
 // Recursively walk a CodeCommit folder and download all files into destDir.
 async function downloadFolder(
@@ -61,7 +64,11 @@ async function downloadFolder(
         new GetFileCommand({ repositoryName: repoName, filePath: f.absolutePath, commitSpecifier })
       );
       if (fileResp.fileContent) {
-        const destPath = join(destDir, f.absolutePath);
+        const destPath = safeJoin(destDir, f.absolutePath);
+        if (!destPath) {
+          log("WARN", `[AWS CodeCommit] Skipping unsafe path ${f.absolutePath}`);
+          continue;
+        }
         await mkdir(dirname(destPath), { recursive: true });
         await writeFile(destPath, Buffer.from(fileResp.fileContent));
         filesWritten++;
@@ -146,7 +153,10 @@ export async function checkoutS3(
 
     // Collect bytes
     const chunks: Buffer[] = [];
+    let received = 0;
     for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) {
+      received += chunk.byteLength;
+      if (received > MAX_ARCHIVE_BYTES) throw new Error(`S3 archive exceeds ${MAX_ARCHIVE_BYTES} bytes`);
       chunks.push(Buffer.from(chunk as Uint8Array));
     }
     const buffer = Buffer.concat(chunks);
@@ -156,13 +166,23 @@ export async function checkoutS3(
       const ex = extract();
       ex.on("entry", (header, stream, next) => {
         if (header.type !== "file") { stream.resume(); next(); return; }
+        const dest = safeJoin(dir, header.name);
+        if (!dest) {
+          log("WARN", `[AWS S3] Skipping unsafe archive entry ${header.name}`);
+          stream.resume();
+          next();
+          return;
+        }
         const chunks2: Buffer[] = [];
         stream.on("data", (c: unknown) => chunks2.push(Buffer.from(c as Uint8Array)));
         stream.on("end", async () => {
-          const dest = join(dir, header.name);
-          await mkdir(dirname(dest), { recursive: true });
-          await writeFile(dest, Buffer.concat(chunks2));
-          next();
+          try {
+            await mkdir(dirname(dest), { recursive: true });
+            await writeFile(dest, Buffer.concat(chunks2));
+            next();
+          } catch (err) {
+            next(err as Error);
+          }
         });
         stream.on("error", next);
       });
