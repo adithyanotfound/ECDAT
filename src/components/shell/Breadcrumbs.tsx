@@ -11,7 +11,7 @@ const segmentLabels: Record<string, string> = {
   profiles: "Profiles",
   scans: "Scans",
   assets: "Assets",
-  inventory: "Inventory",
+  recommendations: "Recommendations",
   pqc: "PQC",
   vulnerabilities: "Vulnerabilities",
   reports: "Reports",

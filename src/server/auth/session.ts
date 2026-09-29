@@ -56,3 +56,13 @@ export function getTokenFromCookieHeader(cookieHeader: string | null): string | 
   const match = cookieHeader.split(";").find((c) => c.trim().startsWith(`${COOKIE_NAME}=`));
   return match ? match.trim().slice(COOKIE_NAME.length + 1) : null;
 }
+
+import { cookies } from 'next/headers';
+export async function requireSession(): Promise<SessionPayload> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('session')?.value;
+  if (!token) throw new Error('Unauthorized');
+  const session = await verifySessionToken(token);
+  if (!session) throw new Error('Unauthorized');
+  return session;
+}

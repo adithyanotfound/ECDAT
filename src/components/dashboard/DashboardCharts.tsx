@@ -1,39 +1,56 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type {
-  VulnBySource,
-  PostureBreakdown,
-  AssetByType,
-} from "@/fixtures/types";
+import type { VulnBySource, PostureBreakdown, AssetByType } from "@/fixtures/types";
 
 const StackedBar = dynamic(
   () => import("@/components/charts/StackedBar").then((m) => m.StackedBar),
-  { ssr: false, loading: () => <ChartSkeleton h={240} /> }
+  { ssr: false, loading: () => <Skeleton h={240} /> }
 );
 const PostureDonut = dynamic(
-  () =>
-    import("@/components/charts/PostureDonut").then((m) => m.PostureDonut),
-  { ssr: false, loading: () => <ChartSkeleton h={200} /> }
+  () => import("@/components/charts/PostureDonut").then((m) => m.PostureDonut),
+  { ssr: false, loading: () => <Skeleton h={200} /> }
 );
 const TypeBars = dynamic(
   () => import("@/components/charts/TypeBars").then((m) => m.TypeBars),
-  { ssr: false, loading: () => <ChartSkeleton h={220} /> }
+  { ssr: false, loading: () => <Skeleton h={220} /> }
 );
 const KeyDistributionDonut = dynamic(
-  () =>
-    import("@/components/charts/KeyDistributionDonut").then(
-      (m) => m.KeyDistributionDonut
-    ),
-  { ssr: false, loading: () => <ChartSkeleton h={150} /> }
+  () => import("@/components/charts/KeyDistributionDonut").then((m) => m.KeyDistributionDonut),
+  { ssr: false, loading: () => <Skeleton h={150} /> }
 );
 
-function ChartSkeleton({ h }: { h: number }) {
+function Skeleton({ h }: { h: number }) {
   return (
     <div
-      className="rounded-lg animate-pulse"
-      style={{ height: h, backgroundColor: "var(--color-surface-2)" }}
+      className="rounded-lg"
+      style={{ height: h, backgroundColor: "var(--color-surface-2)", animation: "pulse 2s infinite" }}
     />
+  );
+}
+
+function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="rounded-xl p-5"
+      style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+    >
+      <div className="mb-4">
+        <p className="text-sm font-semibold" style={{ color: "var(--color-ink)" }}>{title}</p>
+        {subtitle && (
+          <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-faint)" }}>{subtitle}</p>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <h2 className="text-sm font-semibold uppercase tracking-wide" style={{ color: "var(--color-ink-muted)" }}>
+      {title}
+    </h2>
   );
 }
 
@@ -53,120 +70,50 @@ export function DashboardCharts({
   asymmetricKeyDistribution,
 }: DashboardChartsProps) {
   return (
-    <>
+    <div className="flex flex-col gap-6">
       {/* Vulnerabilities section */}
-      <div>
-        <h2
-          className="text-lg font-semibold mb-4"
-          style={{ color: "var(--color-ink)" }}
-        >
-          Vulnerabilities
-        </h2>
+      <div className="flex flex-col gap-3">
+        <SectionHeader title="Vulnerabilities" />
         <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <div
-            className="rounded-xl p-5"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-            }}
+          <Card
+            title="Issues by Source"
+            subtitle="Where security weaknesses were found in your code"
           >
-            <h3
-              className="text-sm font-semibold mb-4"
-              style={{ color: "var(--color-ink)" }}
-            >
-              By Source Type
-            </h3>
             <StackedBar data={vulnerabilitiesBySource} />
-            <p
-              className="text-xs mt-3"
-              style={{ color: "var(--color-ink-faint)" }}
-            >
-              Last updated 30 min ago.
-            </p>
-          </div>
-          <div
-            className="rounded-xl p-5"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-            }}
+          </Card>
+          <Card
+            title="Security Posture"
+            subtitle="Risk distribution of all cryptographic assets"
           >
-            <h3
-              className="text-sm font-semibold mb-4"
-              style={{ color: "var(--color-ink)" }}
-            >
-              Cryptographic Posture
-            </h3>
             <PostureDonut data={cryptographicPosture} />
-            <p
-              className="text-xs mt-3"
-              style={{ color: "var(--color-ink-faint)" }}
-            >
-              Last updated 30 min ago.
-            </p>
-          </div>
+          </Card>
         </div>
       </div>
 
-      {/* Cryptographic Assets section */}
-      <div>
-        <h2
-          className="text-lg font-semibold mb-4"
-          style={{ color: "var(--color-ink)" }}
+      {/* Crypto assets section */}
+      <div className="flex flex-col gap-3">
+        <SectionHeader title="Cryptographic Assets" />
+        <Card
+          title="Asset Types"
+          subtitle="Kinds of cryptographic objects discovered"
         >
-          Cryptographic Assets
-        </h2>
-        <div
-          className="grid gap-4"
-          style={{ gridTemplateColumns: "1fr 1fr 1fr" }}
-        >
-          <div
-            className="rounded-xl p-5"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-            }}
+          <TypeBars data={assetsByType} />
+        </Card>
+        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <Card
+            title="Symmetric Keys"
+            subtitle="Secret key algorithms used for data encryption"
           >
-            <h3
-              className="text-sm font-semibold mb-4"
-              style={{ color: "var(--color-ink)" }}
-            >
-              Cryptographic Asset By Type
-            </h3>
-            <TypeBars data={assetsByType} />
-          </div>
-          <div
-            className="rounded-xl p-5"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-            }}
-          >
-            <h3
-              className="text-sm font-semibold mb-4"
-              style={{ color: "var(--color-ink)" }}
-            >
-              Symmetric Keys
-            </h3>
             <KeyDistributionDonut data={symmetricKeyDistribution} />
-          </div>
-          <div
-            className="rounded-xl p-5"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-            }}
+          </Card>
+          <Card
+            title="Asymmetric Keys"
+            subtitle="Public/private key pairs for signing and key exchange"
           >
-            <h3
-              className="text-sm font-semibold mb-4"
-              style={{ color: "var(--color-ink)" }}
-            >
-              Asymmetric Keys
-            </h3>
             <KeyDistributionDonut data={asymmetricKeyDistribution} />
-          </div>
+          </Card>
         </div>
       </div>
-    </>
+    </div>
   );
 }

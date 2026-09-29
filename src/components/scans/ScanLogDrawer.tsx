@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Terminal, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { X, Terminal, CheckCircle2, XCircle, Loader2, GitCompare } from "lucide-react";
+import { ScanDiffPanel } from "./ScanDiffPanel";
 
 interface LogEntry {
   id: string;
@@ -32,8 +33,15 @@ const levelPrefix: Record<string, string> = {
 export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<"streaming" | "done" | "failed" | "idle">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"logs" | "changes">("logs");
   const scrollRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    setActiveTab("logs");
+    setErrorMessage(null);
+  }, [scanId]);
 
   useEffect(() => {
     if (!scanId) {
@@ -48,26 +56,23 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
     const es = new EventSource(`/api/scans/${scanId}/logs/stream`);
     esRef.current = es;
 
-    es.onmessage = (e) => {
-      const entry = JSON.parse(e.data) as LogEntry;
-      setLogs((prev) => [...prev, entry]);
-      // Auto-scroll to bottom
+    const handleLog = (data: string) => {
+      const entry = JSON.parse(data) as LogEntry;
+      setLogs((prev) => prev.some(l => l.id === entry.id) ? prev : [...prev, entry]);
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
       }, 50);
     };
 
-    es.addEventListener("log", (e) => {
-      const entry = JSON.parse((e as MessageEvent).data) as LogEntry;
-      setLogs((prev) => [...prev, entry]);
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-      }, 50);
-    });
+    es.onmessage = (e) => handleLog(e.data);
+    es.addEventListener("log", (e) => handleLog((e as MessageEvent).data));
 
     es.addEventListener("done", (e) => {
-      const data = JSON.parse((e as MessageEvent).data) as { status: string };
+      const data = JSON.parse((e as MessageEvent).data) as { status: string; errorMessage?: string };
       setStatus(data.status === "FAILED" ? "failed" : "done");
+      if (data.errorMessage) {
+        setErrorMessage(data.errorMessage);
+      }
       es.close();
     });
 
@@ -96,14 +101,14 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
         onClick={onClose}
       />
 
-      {/* Drawer */}
+      {/* Modal */}
       <div
-        className="fixed right-0 top-0 bottom-0 z-50 flex flex-col"
+        className="fixed inset-4 md:inset-8 z-50 flex flex-col rounded-xl overflow-hidden shadow-2xl"
         style={{
-          width: "520px",
           backgroundColor: "var(--color-surface)",
-          borderLeft: "1px solid var(--color-border)",
-          boxShadow: "-16px 0 48px rgba(0,0,0,0.4)",
+          border: "1px solid var(--color-border)",
+          minHeight: "60vh",
+          maxHeight: "90vh"
         }}
       >
         {/* Header */}
@@ -154,8 +159,31 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
           </div>
         </div>
 
+        {/* Tab strip */}
+        <div className="flex items-center gap-1 px-4 pt-2 flex-shrink-0" style={{ borderBottom: "1px solid var(--color-border)" }}>
+          {([
+            { id: "logs" as const, label: "Logs", icon: Terminal },
+            { id: "changes" as const, label: "Changes", icon: GitCompare },
+          ]).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+              style={{
+                color: activeTab === tab.id ? "var(--color-accent)" : "var(--color-ink-muted)",
+                borderBottom: activeTab === tab.id ? "2px solid var(--color-accent)" : "2px solid transparent",
+              }}
+            >
+              <tab.icon size={12} /> {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "changes" && <ScanDiffPanel scanId={scanId} />}
+
         {/* Log output */}
         <div
+          hidden={activeTab !== "logs"}
           ref={scrollRef}
           className="flex-1 overflow-y-auto p-4 font-mono"
           style={{
@@ -212,7 +240,12 @@ export function ScanLogDrawer({ scanId, onClose }: ScanLogDrawerProps) {
                 borderTop: "1px solid var(--color-border)",
               }}
             >
-              ✕ Scan failed
+              <div className="font-semibold mb-1">✕ Scan failed</div>
+              {errorMessage && (
+                <div className="opacity-90 mt-1 whitespace-pre-wrap font-sans text-sm">
+                  {errorMessage}
+                </div>
+              )}
             </div>
           )}
         </div>

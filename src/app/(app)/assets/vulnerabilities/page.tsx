@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Finding } from "@/fixtures/types";
 import { SeverityPill } from "@/components/ui/Pill";
+import { StatCard } from "@/components/ui/StatCard";
 import { formatRelativeTime } from "@/lib/format";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -66,37 +67,35 @@ export default function VulnerabilitiesPage() {
     <div className="flex flex-col gap-6 animate-fade-in">
       {/* KPI tiles */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-        {[
-          { label: "Open Vulnerabilities", value: openCount, color: "var(--color-critical)" },
-          { label: "Critical Findings", value: criticalCount, color: "var(--color-high)" },
-          { label: "High Severity", value: highCount, color: "var(--color-moderate)" },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className="rounded-xl p-4"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderLeft: `3px solid ${card.color}`,
-            }}
-          >
-            <p className="text-xs font-medium uppercase tracking-wide mb-2" style={{ color: "var(--color-ink-muted)" }}>
-              {card.label}
-            </p>
-            <p className="text-3xl font-bold tabular-nums" style={{ color: card.color }}>
-              {loading ? "—" : card.value}
-            </p>
-          </div>
-        ))}
+        <StatCard
+          title="Open Vulnerabilities"
+          value={loading ? "—" : openCount}
+          subtitle="Currently open security findings"
+          accentColor="var(--color-critical)"
+          tooltip="Total number of security findings that have not yet been resolved."
+        />
+        <StatCard
+          title="Critical Findings"
+          value={loading ? "—" : criticalCount}
+          subtitle="Highest severity issues"
+          accentColor="var(--color-high)"
+          tooltip="Issues rated Critical — must be fixed immediately."
+        />
+        <StatCard
+          title="High Severity"
+          value={loading ? "—" : highCount}
+          subtitle="High severity issues"
+          accentColor="var(--color-moderate)"
+          tooltip="Issues rated High — should be addressed in the next sprint."
+        />
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--color-ink)" }}>
-          Vulnerabilities
-          <span className="ml-2 text-sm font-normal" style={{ color: "var(--color-ink-faint)" }}>
-            ({total} total)
-          </span>
-        </h1>
+        <div>
+          <h1 className="text-xl font-bold" style={{ color: "var(--color-ink)" }}>Vulnerabilities</h1>
+          <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-muted)" }}>{total} findings across all repositories</p>
+        </div>
+
         <div className="flex items-center gap-3">
           <div
             className="flex items-center gap-2 rounded-lg px-3 py-2"
@@ -116,7 +115,8 @@ export default function VulnerabilitiesPage() {
               style={{ color: "var(--color-ink)" }}
             />
           </div>
-          <button
+          <a
+            href="/api/findings/export"
             className="px-4 py-2 rounded-lg text-sm font-medium"
             style={{
               backgroundColor: "var(--color-surface)",
@@ -125,7 +125,7 @@ export default function VulnerabilitiesPage() {
             }}
           >
             Export CSV
-          </button>
+          </a>
         </div>
       </div>
 

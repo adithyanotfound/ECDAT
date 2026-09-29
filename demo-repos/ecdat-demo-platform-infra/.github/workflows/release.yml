@@ -1,0 +1,22 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  sign-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import signing key
+        run: echo "$SIGNING_KEY" | gpg --batch --import
+        env:
+          SIGNING_KEY: ${{ secrets.PLATFORM_SIGNING_KEY }}
+
+      - name: Sign release artifact
+        run: gpg --batch --yes --detach-sign --armor dist/platform-infra.tar.gz
+
+      - name: Publish
+        run: echo "publish step placeholder"

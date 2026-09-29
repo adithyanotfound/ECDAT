@@ -1,14 +1,36 @@
 "use client";
 
-import { Bell, Menu } from "lucide-react";
-import { ThemeToggle } from "./ThemeToggle";
+import { useState, useEffect } from "react";
+import { Bell, LogOut } from "lucide-react";
 import { Breadcrumbs } from "./Breadcrumbs";
+import { useRouter } from "next/navigation";
 
-interface TopbarProps {
-  onToggleSidebar: () => void;
-}
+export function Topbar() {
+  const router = useRouter();
+  const [user, setUser] = useState<{ login: string; name: string | null; avatarUrl?: string } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
-export function Topbar({ onToggleSidebar }: TopbarProps) {
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => setUser(d?.user ?? null))
+      .catch(() => setUser(null));
+  }, []);
+
+  const displayName = user ? (user.name || user.login) : "User";
+  const initial = displayName.charAt(0).toUpperCase();
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+    router.push("/login");
+    router.refresh();
+  }
+
   return (
     <header
       className="flex items-center gap-4 px-5"
@@ -19,18 +41,6 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
         flexShrink: 0,
       }}
     >
-      {/* Hamburger */}
-      <button
-        onClick={onToggleSidebar}
-        className="p-1.5 rounded-md transition-colors"
-        style={{ color: "var(--color-ink-muted)" }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-ink)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-ink-muted)")}
-        aria-label="Toggle sidebar"
-      >
-        <Menu size={18} />
-      </button>
-
       {/* Breadcrumbs */}
       <div className="flex-1">
         <Breadcrumbs />
@@ -38,34 +48,42 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
 
       {/* Right controls */}
       <div className="flex items-center gap-3">
-        {/* Welcome text */}
-        <span
-          className="text-sm hidden md:block"
-          style={{ color: "var(--color-ink-muted)" }}
-        >
-          Welcome{" "}
-          <span style={{ color: "var(--color-ink)", fontWeight: 500 }}>Saurabh</span>
+        {/* Welcome */}
+        <span className="text-sm hidden md:block" style={{ color: "var(--color-ink-muted)" }}>
+          {user ? (
+            <>
+              Welcome{" "}
+              <span style={{ color: "var(--color-ink)", fontWeight: 500 }}>{displayName}</span>
+            </>
+          ) : null}
         </span>
 
         {/* Avatar */}
-        <div
-          className="flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0"
-          style={{
-            width: "32px",
-            height: "32px",
-            background: "linear-gradient(135deg, var(--color-accent), #6B8FFF)",
-            color: "white",
-          }}
-        >
-          S
-        </div>
+        {user?.avatarUrl ? (
+          <img
+            src={user.avatarUrl}
+            alt={displayName}
+            className="rounded-full flex-shrink-0 object-cover"
+            style={{ width: "32px", height: "32px", border: "1px solid var(--color-border)" }}
+          />
+        ) : (
+          <div
+            className="flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0"
+            style={{
+              width: "32px",
+              height: "32px",
+              background: "linear-gradient(135deg, var(--color-accent), #6B8FFF)",
+              color: "white",
+            }}
+          >
+            {initial}
+          </div>
+        )}
 
         {/* Bell */}
         <button
-          className="p-1.5 rounded-md relative transition-colors"
+          className="p-1.5 rounded-md relative"
           style={{ color: "var(--color-ink-muted)" }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-ink)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-ink-muted)")}
           aria-label="Notifications"
         >
           <Bell size={16} />
@@ -75,8 +93,6 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
           />
         </button>
 
-        {/* Theme toggle */}
-        <ThemeToggle />
       </div>
     </header>
   );

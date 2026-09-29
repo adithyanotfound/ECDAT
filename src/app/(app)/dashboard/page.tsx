@@ -1,24 +1,19 @@
 import type { Metadata } from "next";
 import { dashboardAggregates as fixtureDashboard } from "@/fixtures/dashboard";
 import { StatCard } from "@/components/ui/StatCard";
-import { ReadinessGauge } from "@/components/charts/ReadinessGauge";
 import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
+import { RecommendationsTable } from "@/components/dashboard/RecommendationsTable";
 import { getDashboardAggregates } from "@/server/db/dashboard";
 import type { DashboardAggregates } from "@/fixtures/types";
 
 export const metadata: Metadata = {
   title: "Dashboard — ECDAT Atlas",
-  description:
-    "Overview of your cryptographic posture, quantum readiness, and vulnerabilities.",
+  description: "Overview of your cryptographic posture, quantum readiness, and vulnerabilities.",
 };
 
 async function getData(): Promise<DashboardAggregates> {
-  try {
-    return await getDashboardAggregates();
-  } catch {
-    // Fallback to fixtures when DB is not yet connected
-    return fixtureDashboard;
-  }
+  try { return await getDashboardAggregates(); }
+  catch { return fixtureDashboard; }
 }
 
 export default async function DashboardPage() {
@@ -27,79 +22,39 @@ export default async function DashboardPage() {
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
       {/* Page header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--color-ink)" }}>
+      <div>
+        <h1 className="text-xl font-bold" style={{ color: "var(--color-ink)" }}>
           Dashboard
         </h1>
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "140px",
-            }}
-          >
-            <span>Source Type</span>
-            <span className="ml-auto" style={{ color: "var(--color-ink-faint)" }}>▼</span>
-          </div>
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "140px",
-            }}
-          >
-            <span>Last Discovered</span>
-            <span className="ml-auto" style={{ color: "var(--color-ink-faint)" }}>▼</span>
-          </div>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            Submit
-          </button>
-          <button
-            className="px-4 py-2 rounded-lg text-sm font-medium"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-            }}
-          >
-            Reset Charts
-          </button>
-        </div>
+        <p className="text-sm mt-0.5" style={{ color: "var(--color-ink-muted)" }}>
+          Cryptographic health overview across all connected repositories
+        </p>
       </div>
 
       {/* KPI tiles */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
         <StatCard
-          title="Quantum Readiness Score"
-          value={d.quantumReadinessScore}
-          subtitle="Organisation-wide PQC posture"
+          title="Quantum Readiness"
+          value={`${d.quantumReadinessScore}/10`}
+          subtitle="PQC posture score"
           accentColor="var(--color-stat-teal)"
-        >
-          <div className="flex items-center">
-            <ReadinessGauge score={d.quantumReadinessScore} size={90} />
-          </div>
-        </StatCard>
-
-        <StatCard
-          title="Cryptographic Assets"
-          value={d.cryptographicAssetsCount}
-          subtitle="Discovered artefacts across all repos"
-          accentColor="var(--color-stat-teal)"
+          tooltip="Measures how ready your cryptography is against quantum threats. 10/10 = fully quantum-safe."
         />
 
         <StatCard
-          title="Discovered Services"
-          value={d.repositoriesScanned}
-          subtitle="Repositories scanned"
+          title="Crypto Assets"
+          value={d.cryptographicAssetsCount}
+          subtitle="Keys, certs & algorithms found"
           accentColor="var(--color-stat-teal)"
+          tooltip="Total cryptographic objects discovered across all scanned repositories."
+        />
+
+        <StatCard
+          title="Repos Scanned"
+          value={d.repositoriesScanned}
+          subtitle="Repositories analysed"
+          accentColor="var(--color-stat-teal)"
+          tooltip="Number of code repositories that have been scanned at least once."
         />
 
         <StatCard
@@ -107,6 +62,7 @@ export default async function DashboardPage() {
           value={`${d.vulnerableAssetsPercent}%`}
           subtitle="Assets with open findings"
           accentColor="var(--color-stat-amber)"
+          tooltip="Percentage of crypto assets that have at least one known security issue."
         />
 
         <StatCard
@@ -114,10 +70,11 @@ export default async function DashboardPage() {
           value={d.highRiskAssets}
           subtitle="CRSF score ≥ 70"
           accentColor="var(--color-stat-orange)"
+          tooltip="Assets with a Crypto Risk Severity Factor ≥ 70 — needs immediate attention."
         />
       </div>
 
-      {/* Charts (client — Recharts) */}
+      {/* Charts */}
       <DashboardCharts
         vulnerabilitiesBySource={d.vulnerabilitiesBySource}
         cryptographicPosture={d.cryptographicPosture}
@@ -125,6 +82,9 @@ export default async function DashboardPage() {
         symmetricKeyDistribution={d.symmetricKeyDistribution}
         asymmetricKeyDistribution={d.asymmetricKeyDistribution}
       />
+
+      {/* Recommendations */}
+      <RecommendationsTable />
     </div>
   );
 }

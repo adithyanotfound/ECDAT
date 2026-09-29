@@ -1,17 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { cryptoAssets } from "@/fixtures/assets";
+import { useState, useEffect } from "react";
 import { DataTable } from "@/components/ui/DataTable";
 import { ScoreBar, SeverityPill, ScorePill } from "@/components/ui/Pill";
 import { Drawer } from "@/components/ui/Drawer";
 import { Tabs } from "@/components/ui/Tabs";
+import { MoscaTimeline } from "@/components/ui/MoscaTimeline";
 import type { ColumnDef } from "@/components/ui/DataTable";
 import type { CryptoAsset } from "@/fixtures/types";
 import { formatDate } from "@/lib/format";
 import { Download, Shield } from "lucide-react";
 
 const columns: ColumnDef<CryptoAsset>[] = [
+  {
+    key: "repositoryFullName",
+    header: "Repository",
+    sortable: true,
+    render: (row) => (
+      <span className="text-sm font-medium" style={{ color: "var(--color-ink-muted)" }}>
+        {row.repositoryFullName ?? "—"}
+      </span>
+    ),
+  },
   {
     key: "name",
     header: "Algorithm Name",
@@ -41,6 +51,29 @@ const columns: ColumnDef<CryptoAsset>[] = [
       </span>
     ),
     getValue: (row) => row.keyLengthBits ?? 0,
+  },
+  {
+    key: "moscaVerdict",
+    header: "Mosca Verdict",
+    sortable: true,
+    width: "120px",
+    render: (row) => {
+      const v = row.moscaVerdict ?? (row.quantumSafe ? "SAFE" : "PLAN");
+      const c = v === "ACT_NOW" ? "#F0516B" : v === "PLAN" ? "#F2C14E" : "#3FCF8E";
+      return (
+        <span
+          className="text-xs px-2 py-0.5 rounded-full font-semibold"
+          style={{
+            backgroundColor: `${c}1a`,
+            color: c,
+            border: `1px solid ${c}44`,
+          }}
+        >
+          {v.replace("_", " ")}
+        </span>
+      );
+    },
+    getValue: (row) => row.moscaVerdict ?? (row.quantumSafe ? "SAFE" : "PLAN"),
   },
   {
     key: "crsfScore",
@@ -117,10 +150,20 @@ function AssetDrawer({ asset, onClose }: { asset: CryptoAsset | null; onClose: (
           tabs={[
             { id: "details", label: "Details" },
             { id: "cis", label: "CIS Explanation" },
+            { id: "mosca", label: "Mosca" },
           ]}
         >
           {(activeTab) =>
-            activeTab === "details" ? (
+            activeTab === "mosca" ? (
+              <div className="mt-4 p-4 rounded-lg" style={{ backgroundColor: "var(--color-surface-2)" }}>
+                <MoscaTimeline
+                  x={asset.moscaX ?? 5}
+                  y={asset.moscaY ?? 3}
+                  z={asset.moscaZ ?? 7}
+                  verdict={asset.moscaVerdict ?? (asset.quantumSafe ? "SAFE" : "PLAN")}
+                />
+              </div>
+            ) : activeTab === "details" ? (
               <div className="mt-4">
                 <table className="w-full text-sm">
                   <thead>
@@ -229,8 +272,17 @@ function AssetDrawer({ asset, onClose }: { asset: CryptoAsset | null; onClose: (
 
 export default function PqcPage() {
   const [selectedAsset, setSelectedAsset] = useState<CryptoAsset | null>(null);
+  const [algorithms, setAlgorithms] = useState<CryptoAsset[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const algorithms = cryptoAssets.filter((a) => a.kind === "Algorithm");
+  useEffect(() => {
+    // Fetch ALL kinds: ALGORITHM, KEY, CERTIFICATE, PROTOCOL, SECRET
+    // so AWS KMS keys, ACM certs, and code-level findings all appear
+    fetch("/api/assets?pageSize=500")
+      .then((r) => r.json())
+      .then((data) => setAlgorithms(data.items ?? []))
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
@@ -240,7 +292,7 @@ export default function PqcPage() {
             PQC — Cryptographic Inventory
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--color-ink-muted)" }}>
-            Algorithms · Certificates · Keys · Protocols
+            Algorithms · Certificates · Keys · Protocols · AWS Cloud Assets
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -251,46 +303,17 @@ export default function PqcPage() {
           >
             <Shield size={14} /> CBOM Report
           </a>
-          <button
+          <a
+            href="/api/assets/export"
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
             style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
           >
-            <Download size={14} /> Download CBOM
-          </button>
+            <Download size={14} /> Export Inventory (JSON)
+          </a>
         </div>
       </div>
 
-      {/* Filter row */}
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: "var(--color-ink-muted)" }}>Algorithm</label>
-          <div
-            className="rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "120px",
-            }}
-          >
-            All
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs" style={{ color: "var(--color-ink-muted)" }}>CRSF Score</label>
-          <div
-            className="rounded-lg px-3 py-2 text-sm"
-            style={{
-              backgroundColor: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-ink-muted)",
-              minWidth: "120px",
-            }}
-          >
-            All
-          </div>
-        </div>
-      </div>
+
 
       <DataTable
         data={algorithms}
@@ -304,14 +327,6 @@ export default function PqcPage() {
 
       <p className="text-xs" style={{ color: "var(--color-ink-faint)" }}>
         Showing 1 to {Math.min(algorithms.length, 11)} of {algorithms.length} records
-        &nbsp;&nbsp;Page Size:{" "}
-        <select
-          className="rounded px-1 py-0.5 text-xs"
-          style={{ backgroundColor: "var(--color-surface-2)", color: "var(--color-ink-muted)", border: "1px solid var(--color-border)" }}
-        >
-          <option>20</option>
-          <option>50</option>
-        </select>
       </p>
 
       {/* Detail drawer */}

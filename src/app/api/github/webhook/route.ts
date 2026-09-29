@@ -14,8 +14,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
 import { verifyWebhookSignature } from "@/server/github/webhook";
 import { enqueueJob } from "@/server/jobs/queue";
+import { isRateLimited } from "@/server/security/rateLimit";
+
+// GitHub's own webhook delivery volume from a single App install is bursty
+// but bounded — this ceiling is generous for legitimate traffic and cheap
+// insurance against a flood (spoofed or not) tying up the job queue.
+const WEBHOOK_RATE_LIMIT = 60;
+const WEBHOOK_RATE_WINDOW_MS = 60_000;
 
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (isRateLimited(`webhook:${ip}`, WEBHOOK_RATE_LIMIT, WEBHOOK_RATE_WINDOW_MS)) {
+    console.warn(`[webhook] rate limit exceeded for ${ip}`);
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   // 1. Read raw body — must happen before any JSON.parse
   const rawBody = await req.text();
 
@@ -55,7 +68,9 @@ export async function POST(req: NextRequest) {
       console.log(`[webhook] unhandled event: ${event}`);
     }
   } catch (err) {
-    console.error(`[webhook] handler error for ${event}:`, err);
+    // Message only — never the raw error, which can carry a live
+    // installation token on an Octokit error's `.request` property.
+    console.error(`[webhook] handler error for ${event}:`, err instanceof Error ? err.message : String(err));
     // Still return 200 to prevent GitHub from retrying with duplicate delivery IDs
   }
 
@@ -71,18 +86,25 @@ async function handlePush(payload: {
   installation?: { id: number };
   repository: { id: number; full_name: string; owner: { login: string }; name: string };
 }) {
-  const installationId = payload.installation?.id;
-  if (!installationId) return;
+  const installationId = payload.installation?.id ?? 0;
 
   // Only scan default branch pushes (avoid PR branches for initial implementation)
   const { ref, after: commitSha, repository } = payload;
   if (!ref.startsWith("refs/heads/")) return;
 
   // Find the repository in our DB
-  const repo = await prisma.repository.findUnique({
+  let repo = await prisma.repository.findFirst({
     where: { githubRepoId: repository.id },
-    select: { id: true, scanEnabled: true, owner: true, name: true },
+    select: { id: true, scanEnabled: true, owner: true, name: true, fullName: true },
   });
+  
+  if (!repo) {
+    // Fallback for manually added repositories
+    repo = await prisma.repository.findUnique({
+      where: { fullName: repository.full_name },
+      select: { id: true, scanEnabled: true, owner: true, name: true, fullName: true },
+    });
+  }
   if (!repo || !repo.scanEnabled) return;
 
   // Create scan row + enqueue
@@ -100,7 +122,7 @@ async function handlePush(payload: {
     scanId: scan.id,
     repositoryId: repo.id,
     installationId,
-    owner: repo.owner,
+    owner: repo.owner === "admin" ? repo.fullName.split("/")[0] : repo.owner,
     repo: repo.name,
     ref,
     commitSha: commitSha.slice(0, 7),
@@ -111,7 +133,11 @@ async function handlePush(payload: {
 
 async function handleInstallation(payload: {
   action: string;
-  installation: { id: number };
+  installation: { 
+    id: number;
+    account?: { login: string; type?: string; avatar_url?: string };
+  };
+  repositories?: Array<{ id: number; full_name: string; name: string; private: boolean }>;
 }) {
   const { action, installation } = payload;
   const githubInstallationId = installation.id;
@@ -135,6 +161,62 @@ async function handleInstallation(payload: {
       where: { installation: { githubInstallationId } },
       data: { scanEnabled: true },
     });
+  } else if (action === "created") {
+    const { account } = installation;
+    const inst = await prisma.installation.upsert({
+      where: { githubInstallationId },
+      create: {
+        githubInstallationId,
+        accountLogin: account?.login ?? "unknown",
+        accountType: account?.type ?? "User",
+        avatarUrl: account?.avatar_url ?? null,
+      },
+      update: {
+        accountLogin: account?.login ?? "unknown",
+        avatarUrl: account?.avatar_url ?? null,
+        suspendedAt: null,
+      },
+    });
+
+    if (payload.repositories) {
+      for (const ghRepo of payload.repositories) {
+        const [owner] = ghRepo.full_name.split("/");
+        const repo = await prisma.repository.upsert({
+          where: { githubRepoId: ghRepo.id },
+          create: {
+            installationId: inst.id,
+            githubRepoId: ghRepo.id,
+            fullName: ghRepo.full_name,
+            owner,
+            name: ghRepo.name,
+            defaultBranch: "main",
+            isPrivate: ghRepo.private,
+            scanEnabled: true,
+          },
+          update: { scanEnabled: true },
+        });
+
+        const scan = await prisma.scan.create({
+          data: {
+            repositoryId: repo.id,
+            trigger: "INITIAL",
+            status: "QUEUED",
+            commitSha: "unknown",
+            ref: "refs/heads/main",
+          },
+        });
+
+        await enqueueJob("INITIAL_SCAN", {
+          scanId: scan.id,
+          repositoryId: repo.id,
+          installationId: githubInstallationId,
+          owner,
+          repo: ghRepo.name,
+          ref: "refs/heads/main",
+          commitSha: "unknown",
+        });
+      }
+    }
   }
 }
 

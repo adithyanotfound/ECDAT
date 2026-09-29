@@ -4,57 +4,62 @@
  */
 import { prisma } from "./client";
 import type { DashboardAggregates, VulnBySource, PostureBreakdown, AssetByType } from "@/fixtures/types";
+import { requireSession } from "@/server/auth/session";
 
 export async function getDashboardAggregates(): Promise<DashboardAggregates> {
+  const session = await requireSession();
+  const owner = session.login;
+
   const [
     totalAssets,
     highRiskAssets,
     vulnAssets,
-    assetsByKind,
+    assetsRaw,
   ] = await Promise.all([
-    prisma.cryptoAsset.count(),
-    prisma.riskAssessment.count({ where: { crsfScore: { gte: 70 } } }),
-    prisma.riskAssessment.count({ where: { crsfScore: { gt: 0 } } }),
-    prisma.cryptoAsset.groupBy({
-      by: ["kind"],
-      _count: { kind: true },
-      orderBy: { _count: { kind: "desc" } },
+    prisma.cryptoAsset.count({ where: { repository: { owner } } }),
+    prisma.riskAssessment.count({ where: { crsfScore: { gte: 70 }, cryptoAsset: { repository: { owner } } } }),
+    prisma.riskAssessment.count({ where: { crsfScore: { gt: 0 }, cryptoAsset: { repository: { owner } } } }),
+    prisma.cryptoAsset.findMany({
+      where: { repository: { owner } },
+      select: { kind: true },
     }),
   ]);
 
-  // Quantum readiness: average PQC safety score across all assets (roll up to 0–10)
+  const kindCounts = assetsRaw.reduce((acc, curr) => {
+    acc[curr.kind] = (acc[curr.kind] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const assetsByKind = Object.entries(kindCounts).map(([kind, _count]) => ({ kind, _count: { kind: _count } })).sort((a, b) => b._count.kind - a._count.kind);
+
+  // Quantum readiness: average PQC safety score, rolled up to 0–10.
+  // Scoped to actual cryptographic primitives (algorithms, keys, certs) —
+  // a LIBRARY row (dependency presence) or a PROTOCOL row (TLS version pin,
+  // already captured separately as a finding) isn't itself a graded
+  // primitive and would dilute the signal this score exists to give.
   const avgPqc = await prisma.riskAssessment.aggregate({
+    where: { cryptoAsset: { kind: { in: ["ALGORITHM", "CERTIFICATE", "KEY"] }, repository: { owner } } },
     _avg: { pqcSafetyScore: true },
   });
   const quantumReadinessScore = Math.round(avgPqc._avg.pqcSafetyScore ?? 5);
 
   // Repositories scanned
   const repositoriesScanned = await prisma.scan.findMany({
-    where: { status: "COMPLETED" },
+    where: { status: "COMPLETED", repository: { owner } },
     select: { repositoryId: true },
     distinct: ["repositoryId"],
   });
 
-  // Vulnerabilities by source (map kind → source label)
-  const kindToSource: Record<string, string> = {
-    ALGORITHM: "Code Repo",
-    CERTIFICATE: "Code Repo",
-    KEY: "Code Repo",
-    PROTOCOL: "Network",
-    LIBRARY: "Code Repo",
-    SECRET: "Code Repo",
-  };
-  const findingsBySeverity = await prisma.finding.groupBy({
-    by: ["severity"],
-    where: { status: "OPEN" },
-    _count: { severity: true },
-  });
-
   // Build posture breakdown from risk assessments
-  const postureRaw = await prisma.riskAssessment.groupBy({
-    by: ["riskCategory"],
-    _count: { riskCategory: true },
+  const allRiskAssessments = await prisma.riskAssessment.findMany({
+    where: { cryptoAsset: { repository: { owner } } },
+    select: { riskCategory: true }
   });
+  const postureRaw = Object.entries(
+    allRiskAssessments.reduce((acc, { riskCategory }) => {
+      acc[riskCategory] = (acc[riskCategory] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  ).map(([riskCategory, count]) => ({ riskCategory, _count: { riskCategory: count } }));
   const total = postureRaw.reduce((s, r) => s + r._count.riskCategory, 0) || 1;
   const posturePct = (cat: string) => {
     const found = postureRaw.find((r) => r.riskCategory === cat);
@@ -67,16 +72,27 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     compliant: posturePct("SAFE"),
   };
 
-  // By source type — simplified 7-bar chart
-  const vulnBySource: VulnBySource[] = [
-    "Hosts", "Network", "KMS", "Database", "Code Repo", "File Systems", "Database"
-  ].map((source) => ({
-    source,
-    critical: Math.floor(Math.random() * 10) + 5,
-    high: Math.floor(Math.random() * 8) + 2,
-    moderate: Math.floor(Math.random() * 6) + 1,
-    low: Math.floor(Math.random() * 8) + 3,
-  }));
+  // By artefact source — remap of the reference's "By Source Type" chart onto
+  // the categories this build actually discovers (IMPLEMENTATION_PLAN.md §1
+  // "Dashboard 'By Source Type' → By artefact source: Source Code ·
+  // Dependencies · Certificates · Config · Secrets · Keystores · IaC").
+  // By artefact source
+  const openFindings = await prisma.finding.findMany({
+    where: { status: "OPEN", repository: { owner } },
+    select: { severity: true, filePath: true, code: true },
+  });
+  const sourceBuckets = ["Source Code", "Dependencies", "Certificates", "Config", "Secrets", "Keystores", "IaC"];
+  const bySource: Record<string, { critical: number; high: number; moderate: number; low: number }> = {};
+  for (const source of sourceBuckets) bySource[source] = { critical: 0, high: 0, moderate: 0, low: 0 };
+  for (const f of openFindings) {
+    const bucket = inferArtefactSource(f.filePath, f.code);
+    const counts = bySource[bucket];
+    if (f.severity === "CRITICAL") counts.critical++;
+    else if (f.severity === "HIGH") counts.high++;
+    else if (f.severity === "MODERATE") counts.moderate++;
+    else if (f.severity === "LOW") counts.low++;
+  }
+  const vulnBySource: VulnBySource[] = sourceBuckets.map((source) => ({ source, ...bySource[source] }));
 
   // Asset type distribution
   const kindLabel: Record<string, string> = {
@@ -94,7 +110,7 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
 
   // Key distributions — queried from actual assets
   const symmetricKeys = await prisma.cryptoAsset.findMany({
-    where: { kind: "KEY", primitive: { not: null } },
+    where: { kind: "KEY", primitive: { not: null }, repository: { owner } },
     select: { name: true },
     take: 50,
   });
@@ -102,6 +118,7 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     where: {
       kind: "ALGORITHM",
       primitive: { in: ["signature", "key-agreement"] },
+      repository: { owner }
     },
     select: { name: true },
     take: 50,
@@ -135,4 +152,22 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     symmetricKeyDistribution: buildDistribution(symmetricKeys),
     asymmetricKeyDistribution: buildDistribution(asymmetricKeys),
   };
+}
+
+function inferArtefactSource(filePath: string | null, ruleCode: string): string {
+  const p = (filePath ?? "").toLowerCase();
+  const code = ruleCode.toLowerCase();
+
+  if (/\.tf$/.test(p) || /^protocol-terraform/.test(code)) return "IaC";
+  if (/\.(yaml|yml)$/.test(p) && /(k8s|kube|deployment|secret)/.test(p)) return "IaC";
+  if (/(nginx|apache|httpd|sshd_config|ssh_config|openssl\.cnf)/.test(p) || /^protocol-/.test(code)) return "Config";
+  if (/\.(pem|crt|cer|der|jks|p12|pfx)$/.test(p) || /^cert-/.test(code)) {
+    return /\.(jks|p12|pfx)$/.test(p) ? "Keystores" : "Certificates";
+  }
+  if (/(package\.json|requirements|pom\.xml|build\.gradle|go\.mod|cargo\.toml|cmakelists)/.test(p) || /^manifest-/.test(code)) {
+    return "Dependencies";
+  }
+  if (/^secret-/.test(code)) return "Secrets";
+  if (/^key-/.test(code)) return "Keystores";
+  return "Source Code";
 }

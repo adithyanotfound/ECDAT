@@ -14,21 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* Prevent theme flash */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                var t = document.cookie.split('; ').find(function(r){ return r.startsWith('theme='); });
-                var theme = t ? t.split('=')[1] : 'dark';
-                document.documentElement.setAttribute('data-theme', theme);
-              })();
-            `,
-          }}
-        />
-      </head>
+    <html lang="en" data-scroll-behavior="smooth">
       <body>{children}</body>
     </html>
   );

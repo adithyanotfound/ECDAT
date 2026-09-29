@@ -5,6 +5,13 @@
  *
  * Import path: src/generated/prisma/client (required by Prisma 7's explicit output).
  * Run `npx prisma generate` after any schema change.
+ *
+ * Construction is lazy (behind a Proxy) so importing this module never throws
+ * — Next's build-time "Collecting page data" step imports every route module
+ * without invoking it, and `next build` must succeed with no DATABASE_URL set
+ * (IMPLEMENTATION_PLAN.md §Phase 5 "CI running ... next build"). The clear
+ * "DATABASE_URL is not set" error still fires, just on first real query
+ * instead of on import.
  */
 import { PrismaClient } from "@/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -32,8 +39,15 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-export const prisma = globalForPrisma.prisma ?? createClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function getClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createClient();
+  }
+  return globalForPrisma.prisma;
 }
+
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getClient(), prop, receiver);
+  },
+});

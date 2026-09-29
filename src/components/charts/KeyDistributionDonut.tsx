@@ -1,78 +1,42 @@
 "use client";
 
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
-interface KeyDistribution {
-  name: string;
-  percent: number;
-}
+interface KeyDistribution { name: string; percent: number; }
 
-interface KeyDistributionDonutProps {
-  data: KeyDistribution[];
-  title?: string;
-}
+const COLORS = ["#FF2B44", "#FF6B00", "#FFD000", "#1B72E8", "#00D26A", "#2F5BFF", "#8B5CF6"];
 
-const COLORS = ["#F0516B", "#F79552", "#F2C14E", "#5AA9F5", "#3FCF8E", "#2F5BFF", "#8B5CF6"];
-
-const CustomTooltip = ({ active, payload }: {
+const CustomTooltip = ({ active, payload, label }: {
   active?: boolean;
-  payload?: Array<{ name: string; value: number; payload: { fill: string } }>;
+  payload?: Array<{ value: number; payload: { name: string } }>;
+  label?: string;
 }) => {
-  if (!active || !payload?.[0]) return null;
-  const entry = payload[0];
+  if (!active || !payload) return null;
   return (
     <div
       className="rounded-lg px-3 py-2 text-xs"
-      style={{
-        backgroundColor: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-      }}
+      style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}
     >
-      <p style={{ color: entry.payload.fill }}>{entry.name}: {entry.value}%</p>
+      <p style={{ color: "var(--color-ink)" }}>{label}: <strong>{payload[0]?.value}%</strong></p>
     </div>
   );
 };
 
-export function KeyDistributionDonut({ data, title }: KeyDistributionDonutProps) {
+export function KeyDistributionDonut({ data }: { data: KeyDistribution[] }) {
+  // It's requested to be a bar chart, so we return a horizontal bar chart here.
   return (
-    <div className="flex flex-col gap-3">
-      <ResponsiveContainer width="100%" height={150}>
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            innerRadius={40}
-            outerRadius={65}
-            paddingAngle={2}
-            dataKey="percent"
-            nameKey="name"
-          >
-            {data.map((_, index) => (
-              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-        </PieChart>
-      </ResponsiveContainer>
-      {/* Legend */}
-      <div className="flex flex-col gap-1">
-        {data.map((item, i) => (
-          <div key={item.name} className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="w-2 h-2 rounded-full flex-shrink-0"
-                style={{ backgroundColor: COLORS[i % COLORS.length] }}
-              />
-              <span style={{ color: "var(--color-ink-muted)" }} className="truncate max-w-[120px]">{item.name}</span>
-            </div>
-            <span style={{ color: "var(--color-ink-faint)", fontVariantNumeric: "tabular-nums" }}>
-              {item.percent}%
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 30, bottom: 0, left: 0 }} barSize={12}>
+        <CartesianGrid horizontal={false} stroke="color-mix(in srgb, var(--color-border) 60%, transparent)" strokeDasharray="3 3" />
+        <XAxis type="number" hide />
+        <YAxis type="category" dataKey="name" tick={{ fill: "var(--color-ink-muted)", fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: "color-mix(in srgb, var(--color-accent) 8%, transparent)" }} />
+        <Bar dataKey="percent" radius={[0, 4, 4, 0]}>
+          {data.map((_, i) => (
+            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }

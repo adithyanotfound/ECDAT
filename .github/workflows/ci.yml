@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify dependency tree (no unmet peers)
+        run: npm ls --all > /dev/null
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Build
+        run: npx next build
+        env:
+          # next build must succeed with no live database — every DB call is
+          # behind a try/catch fixture fallback or a lazy client (see
+          # src/server/db/client.ts). No DATABASE_URL is set here on purpose.
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: CBOM schema regression test
+        run: npm run test:cbom

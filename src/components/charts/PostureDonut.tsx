@@ -1,8 +1,6 @@
 "use client";
 
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
-
-interface PostureDonutProps {
+interface PostureBarProps {
   data: {
     high: number;
     medium: number;
@@ -11,69 +9,53 @@ interface PostureDonutProps {
   };
 }
 
-const COLORS = ["#F0516B", "#F79552", "#5AA9F5", "#3FCF8E"];
-const LABELS = ["High", "Medium", "Low", "Compliant"];
+const SEGMENTS = [
+  { key: "high" as const,      label: "High Risk",  color: "#FF2B44", description: "Requires immediate action" },
+  { key: "medium" as const,    label: "Medium Risk", color: "#FFD000", description: "Should be addressed soon" },
+  { key: "low" as const,       label: "Low Risk",    color: "#1B72E8", description: "Monitor and plan" },
+  { key: "compliant" as const, label: "Compliant",   color: "#00D26A", description: "Meets security standards" },
+];
 
-const CustomTooltip = ({ active, payload }: {
-  active?: boolean;
-  payload?: Array<{ name: string; value: number; payload: { fill: string } }>;
-}) => {
-  if (!active || !payload?.[0]) return null;
-  const entry = payload[0];
-  return (
-    <div
-      className="rounded-lg px-3 py-2 text-xs"
-      style={{
-        backgroundColor: "var(--color-surface-2)",
-        border: "1px solid var(--color-border)",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-      }}
-    >
-      <p style={{ color: entry.payload.fill }}>{entry.name}: {entry.value}%</p>
-    </div>
-  );
-};
-
-export function PostureDonut({ data }: PostureDonutProps) {
-  const chartData = [
-    { name: "High", value: data.high },
-    { name: "Medium", value: data.medium },
-    { name: "Low", value: data.low },
-    { name: "Compliant", value: data.compliant },
-  ];
+export function PostureDonut({ data }: PostureBarProps) {
+  const total = data.high + data.medium + data.low + data.compliant || 1;
+  const segments = SEGMENTS.map((s) => ({
+    ...s,
+    value: data[s.key],
+    pct: Math.round((data[s.key] / total) * 100),
+  }));
 
   return (
-    <div className="flex flex-col items-center">
-      <ResponsiveContainer width="100%" height={200}>
-        <PieChart>
-          <Pie
-            data={chartData}
-            cx="50%"
-            cy="50%"
-            innerRadius={60}
-            outerRadius={90}
-            paddingAngle={2}
-            dataKey="value"
-          >
-            {chartData.map((_, index) => (
-              <Cell key={`cell-${index}`} fill={COLORS[index]} />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-        </PieChart>
-      </ResponsiveContainer>
-      {/* Legend */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2">
-        {chartData.map((item, i) => (
-          <div key={item.name} className="flex items-center gap-1.5 text-xs">
-            <span
-              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: COLORS[i] }}
-            />
-            <span style={{ color: "var(--color-ink-muted)" }}>{item.name}</span>
+    <div className="flex flex-col gap-3">
+      {segments.map((s) => (
+        <div key={s.key} className="flex items-center gap-3">
+          <span
+            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: s.color }}
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium" style={{ color: "var(--color-ink-muted)" }}>
+                {s.label}
+              </span>
+              <span className="text-xs font-semibold tabular-nums" style={{ color: "var(--color-ink)" }}>
+                {s.pct}%
+              </span>
+            </div>
+            <div
+              className="h-1.5 rounded-full overflow-hidden"
+              style={{ backgroundColor: "var(--color-surface-2)" }}
+            >
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${s.pct}%`, backgroundColor: s.color }}
+              />
+            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
+      <p className="text-xs mt-1" style={{ color: "var(--color-ink-faint)" }}>
+        Based on risk assessments across all detected cryptographic assets.
+      </p>
     </div>
   );
 }

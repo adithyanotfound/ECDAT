@@ -3,15 +3,16 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar } from "@/components/shell/Topbar";
+import { OnboardingWizard } from "@/components/shell/OnboardingWizard";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "var(--color-bg)" }}>
-      <Sidebar collapsed={collapsed} />
+      <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar onToggleSidebar={() => setCollapsed((c) => !c)} />
+        <Topbar />
         <main
           className="flex-1 overflow-y-auto p-6"
           style={{ backgroundColor: "var(--color-bg)" }}
@@ -19,6 +20,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      {/* Onboarding wizard — shown on first visit */}
+      <OnboardingWizard />
     </div>
   );
 }

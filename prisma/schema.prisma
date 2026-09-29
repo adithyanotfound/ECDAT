@@ -101,8 +101,12 @@ model Installation {
 
 model Repository {
   id                 String       @id @default(cuid())
-  installationId     String
-  githubRepoId       Int          @unique
+  installationId     String?
+  githubRepoId       Int?         @unique
+  sourceType         String       @default("GITHUB") // "GITHUB" | "AWS" | "AZURE"
+  awsAccessKey       String?
+  awsSecretKey       String?
+  awsRegion          String?
   fullName           String       @unique
   owner              String
   name               String
@@ -116,7 +120,7 @@ model Repository {
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  installation       Installation @relation(fields: [installationId], references: [id])
+  installation       Installation? @relation(fields: [installationId], references: [id])
   scans              Scan[]
   cryptoAssets       CryptoAsset[]
   findings           Finding[]
