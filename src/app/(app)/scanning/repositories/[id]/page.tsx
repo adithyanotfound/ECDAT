@@ -5,9 +5,10 @@ import { GitBranch, Shield, AlertTriangle, Play, ArrowLeft } from "lucide-react"
 import Link from "next/link";
 import { formatRelativeTime, truncateHash } from "@/lib/format";
 
-export default async function RepositoryDetailsPage({ params }: { params: { id: string } }) {
+export default async function RepositoryDetailsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const repo = await prisma.repository.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       scans: {
         orderBy: { createdAt: "desc" },

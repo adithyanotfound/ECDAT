@@ -1,277 +1,121 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useEffect, useState } from "react";
+import { Shield, ChevronRight, Activity, Code2, Database } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Lock, User, Shield, Eye, EyeOff, AlertCircle } from "lucide-react";
 
-export default function LoginPage() {
+export default function LandingPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Login failed. Please check your credentials.");
-        return;
-      }
-
-      // Redirect to dashboard on success
-      router.push("/dashboard");
-      router.refresh();
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{
-        background: "linear-gradient(135deg, #EEF2FF 0%, #F0F2F7 50%, #E8F0FE 100%)",
-      }}
-    >
-      {/* Background decoration */}
-      <div
-        className="absolute inset-0 overflow-hidden pointer-events-none"
-        aria-hidden="true"
-      >
-        <div
-          className="absolute -top-40 -right-40 w-96 h-96 rounded-full opacity-20"
-          style={{ background: "radial-gradient(circle, #2F5BFF 0%, transparent 70%)" }}
-        />
-        <div
-          className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full opacity-10"
-          style={{ background: "radial-gradient(circle, #8B5CF6 0%, transparent 70%)" }}
-        />
+    <div className="min-h-screen bg-[#0A0A0B] text-white overflow-hidden relative selection:bg-blue-500/30">
+      {/* Dynamic Background */}
+      <div className="absolute inset-0 z-0 opacity-40">
+        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/20 blur-[120px] animate-pulse" style={{ animationDuration: '4s' }} />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-purple-600/20 blur-[150px] animate-pulse" style={{ animationDuration: '7s', animationDelay: '1s' }} />
+        <div className="absolute top-[40%] left-[60%] w-[30%] h-[30%] rounded-full bg-emerald-500/10 blur-[100px] animate-pulse" style={{ animationDuration: '5s', animationDelay: '2s' }} />
       </div>
 
-      <div className="relative w-full max-w-md animate-slide-up">
-        {/* Card */}
-        <div
-          className="rounded-2xl p-8"
-          style={{
-            backgroundColor: "#FFFFFF",
-            boxShadow: "0 20px 60px rgba(47,91,255,0.12), 0 4px 16px rgba(0,0,0,0.06)",
-            border: "1px solid rgba(216,220,232,0.6)",
-          }}
-        >
-          {/* Logo */}
-          <div className="flex flex-col items-center gap-4 mb-8">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center"
-              style={{
-                background: "linear-gradient(135deg, #2F5BFF 0%, #6B8FFF 100%)",
-                boxShadow: "0 8px 24px rgba(47,91,255,0.3)",
-              }}
-            >
-              <Shield size={28} color="white" />
-            </div>
-            <div className="text-center">
-              <h1
-                className="text-2xl font-bold tracking-tight"
-                style={{ color: "#1A1F36" }}
-              >
-                ECDAT Atlas
-              </h1>
-              <p className="text-sm mt-1" style={{ color: "#5A6480" }}>
-                Enterprise Cryptographic Discovery Platform
-              </p>
-            </div>
+      {/* Grid Overlay */}
+      <div 
+        className="absolute inset-0 z-0 opacity-[0.03]"
+        style={{
+          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.5) 1px, transparent 1px)',
+          backgroundSize: '40px 40px'
+        }}
+      />
+
+      {/* Navbar */}
+      <nav className="relative z-10 flex items-center justify-between px-8 py-6 max-w-7xl mx-auto">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <Shield size={20} className="text-white" />
           </div>
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4" id="login-form">
-            {/* Error message */}
-            {error && (
-              <div
-                className="flex items-center gap-2 rounded-lg px-4 py-3 text-sm"
-                style={{
-                  backgroundColor: "rgba(255,43,68,0.08)",
-                  border: "1px solid rgba(255,43,68,0.2)",
-                  color: "#FF2B44",
-                }}
-                role="alert"
-              >
-                <AlertCircle size={15} style={{ flexShrink: 0 }} />
-                {error}
-              </div>
-            )}
-
-            {/* Username */}
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="username"
-                className="text-xs font-semibold uppercase tracking-wide"
-                style={{ color: "#5A6480" }}
-              >
-                Username
-              </label>
-              <div
-                className="flex items-center gap-3 rounded-xl px-4 py-3"
-                style={{
-                  border: `1px solid ${error ? "rgba(255,43,68,0.3)" : "#D8DCE8"}`,
-                  backgroundColor: "#F8F9FD",
-                  transition: "border-color 0.15s",
-                }}
-              >
-                <User size={15} style={{ color: "#9AA2BA", flexShrink: 0 }} />
-                <input
-                  id="username"
-                  type="text"
-                  placeholder="Enter your username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  autoComplete="username"
-                  className="flex-1 bg-transparent text-sm outline-none"
-                  style={{ color: "#1A1F36" }}
-                  onFocus={(e) => {
-                    const parent = e.target.parentElement!;
-                    parent.style.borderColor = "#2F5BFF";
-                    parent.style.backgroundColor = "#FFFFFF";
-                  }}
-                  onBlur={(e) => {
-                    const parent = e.target.parentElement!;
-                    parent.style.borderColor = "#D8DCE8";
-                    parent.style.backgroundColor = "#F8F9FD";
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Password */}
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="password"
-                className="text-xs font-semibold uppercase tracking-wide"
-                style={{ color: "#5A6480" }}
-              >
-                Password
-              </label>
-              <div
-                className="flex items-center gap-3 rounded-xl px-4 py-3"
-                style={{
-                  border: "1px solid #D8DCE8",
-                  backgroundColor: "#F8F9FD",
-                  transition: "border-color 0.15s",
-                }}
-              >
-                <Lock size={15} style={{ color: "#9AA2BA", flexShrink: 0 }} />
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  className="flex-1 bg-transparent text-sm outline-none"
-                  style={{ color: "#1A1F36" }}
-                  onFocus={(e) => {
-                    const parent = e.target.parentElement!;
-                    parent.style.borderColor = "#2F5BFF";
-                    parent.style.backgroundColor = "#FFFFFF";
-                  }}
-                  onBlur={(e) => {
-                    const parent = e.target.parentElement!;
-                    parent.style.borderColor = "#D8DCE8";
-                    parent.style.backgroundColor = "#F8F9FD";
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  style={{ color: "#9AA2BA" }}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Submit */}
-            <button
-              id="login-submit"
-              type="submit"
-              disabled={loading || !username || !password}
-              className="w-full py-3.5 rounded-xl text-sm font-semibold mt-2"
-              style={{
-                background: loading || !username || !password
-                  ? "#D8DCE8"
-                  : "linear-gradient(135deg, #2F5BFF 0%, #4B75FF 100%)",
-                color: loading || !username || !password ? "#9AA2BA" : "#FFFFFF",
-                border: "none",
-                cursor: loading || !username || !password ? "not-allowed" : "pointer",
-                boxShadow: loading || !username || !password
-                  ? "none"
-                  : "0 4px 16px rgba(47,91,255,0.3)",
-                transition: "all 0.15s",
-              }}
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span
-                    className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
-                    style={{ display: "inline-block" }}
-                  />
-                  Signing in…
-                </span>
-              ) : (
-                "Sign In"
-              )}
-            </button>
-          </form>
-
-          <div
-            className="mt-6 pt-5 text-center text-xs"
-            style={{
-              borderTop: "1px solid #EEF0F7",
-              color: "#9AA2BA",
-            }}
+          <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+            ECDAT Atlas
+          </span>
+        </div>
+        <div className="flex items-center gap-6 text-sm font-medium text-white/60">
+          <span className="hover:text-white transition-colors cursor-pointer">Platform</span>
+          <span className="hover:text-white transition-colors cursor-pointer">Security</span>
+          <span className="hover:text-white transition-colors cursor-pointer">Enterprise</span>
+          <a
+            href="/api/github/login"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all backdrop-blur-md border border-white/10 hover:border-white/20"
           >
-            <p className="mb-2">Don't have an account? Use the demo credentials:</p>
-            <div className="flex items-center justify-center gap-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername("admin");
-                  setPassword("ecdat2024");
-                }}
-                className="px-3 py-1.5 rounded-md font-mono text-xs cursor-pointer hover:bg-gray-100 transition-colors"
-                style={{ border: "1px dashed #D8DCE8", color: "#1A1F36" }}
-              >
-                admin / ecdat2024
-              </button>
-            </div>
-          </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.2c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+            Sign In
+          </a>
+        </div>
+      </nav>
+
+      {/* Hero Section */}
+      <main className="relative z-10 flex flex-col items-center justify-center px-4 pt-20 pb-32 text-center max-w-5xl mx-auto min-h-[80vh]">
+        
+        {/* Badge */}
+        <div className={`mb-8 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-xs font-semibold uppercase tracking-widest transition-all duration-1000 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+          </span>
+          Next-Gen Cryptographic Intelligence
         </div>
 
-        {/* Version badge */}
-        <p
-          className="text-center text-xs mt-4"
-          style={{ color: "#9AA2BA" }}
-        >
-          ECDAT Atlas v1.0 · NTRO Internal Use Only
+        {/* Headline */}
+        <h1 className={`text-6xl md:text-8xl font-extrabold tracking-tighter mb-8 leading-[1.1] transition-all duration-1000 delay-100 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
+          Discover, analyze, and <br/>
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-emerald-400">
+            secure your crypto.
+          </span>
+        </h1>
+
+        {/* Subtitle */}
+        <p className={`text-lg md:text-xl text-white/50 max-w-2xl mb-12 font-medium leading-relaxed transition-all duration-1000 delay-200 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
+          ECDAT Atlas automatically detects legacy algorithms, vulnerable certificates, and non-quantum-safe cryptography across your entire codebase with zero configuration.
         </p>
-      </div>
+
+        {/* CTA */}
+        <div className={`flex flex-col sm:flex-row items-center gap-4 transition-all duration-1000 delay-300 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
+          <a
+            href="/api/github/login"
+            className="group relative flex items-center gap-3 px-8 py-4 bg-white text-black rounded-full font-bold text-lg hover:bg-gray-100 transition-all active:scale-95 overflow-hidden"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.2c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>
+            <span>Get Started</span>
+            <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
+          </a>
+        </div>
+
+        {/* Features Preview */}
+        <div className={`mt-24 grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl transition-all duration-1000 delay-500 transform ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
+          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/[0.02] border border-white/5 backdrop-blur-sm">
+            <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center mb-4 text-blue-400">
+              <Code2 size={24} />
+            </div>
+            <h3 className="font-semibold mb-2">Automated Scanning</h3>
+            <p className="text-sm text-white/50">Push to GitHub and let our engine instantly map your entire cryptographic inventory.</p>
+          </div>
+          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/[0.02] border border-white/5 backdrop-blur-sm">
+            <div className="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center mb-4 text-purple-400">
+              <Activity size={24} />
+            </div>
+            <h3 className="font-semibold mb-2">PQC Readiness</h3>
+            <p className="text-sm text-white/50">Identify quantum-vulnerable algorithms and calculate your Post-Quantum Safety Margin.</p>
+          </div>
+          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-white/[0.02] border border-white/5 backdrop-blur-sm">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4 text-emerald-400">
+              <Database size={24} />
+            </div>
+            <h3 className="font-semibold mb-2">CBOM Export</h3>
+            <p className="text-sm text-white/50">Generate compliant CycloneDX 1.6 Cryptography Bill of Materials (CBOM) instantly.</p>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

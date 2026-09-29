@@ -179,6 +179,7 @@ export async function getCryptoAssetsPage({
       where,
       include: {
         riskAssessment: true,
+        repository: { select: { fullName: true } },
       },
       orderBy,
       skip: (page - 1) * pageSize,
@@ -194,6 +195,7 @@ export async function getCryptoAssetsPage({
     return {
       id: a.id,
       repositoryId: a.repositoryId,
+      repositoryFullName: (a as any).repository?.fullName,
       kind: mapKind(a.kind),
       name: a.name,
       primitive: a.primitive ?? undefined,

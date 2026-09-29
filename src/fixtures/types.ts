@@ -65,6 +65,7 @@ export interface ScanProfile {
 export interface CryptoAsset {
   id: string;
   repositoryId: string;
+  repositoryFullName?: string;
   kind: CryptoKind;
   name: string;
   primitive?: string;

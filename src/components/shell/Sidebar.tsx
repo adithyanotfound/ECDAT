@@ -19,8 +19,6 @@ import {
   LogOut,
   Network,
 } from "lucide-react";
-import { OnboardingTrigger } from "./OnboardingWizard";
-
 interface NavItem {
   label: string;
   href?: string;
@@ -39,7 +37,6 @@ const navItems: NavItem[] = [
     icon: <ScanLine size={16} />,
     children: [
       { label: "Repositories", href: "/scanning/repositories", icon: <GitBranch size={14} /> },
-      { label: "Profiles",     href: "/scanning/profiles",    icon: <Database size={14} /> },
       { label: "Scans",        href: "/scanning/scans",       icon: <Cpu size={14} /> },
     ],
   },
@@ -229,11 +226,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Bottom: Getting Started + Logout */}
       <div className="py-3 px-2 pb-6" style={{ borderTop: "1px solid var(--color-border)" }}>
-        {!collapsed && (
-          <div className="mb-1">
-            <OnboardingTrigger />
-          </div>
-        )}
+
         <button
           onClick={async () => {
             try { await fetch("/api/auth/logout", { method: "POST" }); }

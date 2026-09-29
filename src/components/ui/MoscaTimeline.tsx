@@ -42,10 +42,10 @@ export function MoscaTimeline({ x, y, z, verdict }: MoscaTimelineProps) {
       </p>
       <p className="text-xs mt-1" style={{ color: "var(--color-ink)" }}>
         {z - (x + y) > 0
-          ? <span><strong>Predictive Safety Margin:</strong> You have {z - (x + y)} years before migration must begin.</span>
+          ? <span><strong>Predictive Safety Margin:</strong> You have {z - (x + y)} years before migration must begin. (Safe until {new Date().getFullYear() + (z - (x + y))})</span>
           : z - (x + y) === 0
-          ? <span><strong>Predictive Safety Margin:</strong> Migration must begin <strong>immediately</strong>.</span>
-          : <span><strong>Predictive Safety Margin:</strong> Critical risk. Migration is overdue by {Math.abs(z - (x + y))} years.</span>}
+          ? <span><strong>Predictive Safety Margin:</strong> Migration must begin <strong>immediately</strong>. (Safe until {new Date().getFullYear()})</span>
+          : <span><strong>Predictive Safety Margin:</strong> Critical risk. Migration is overdue by {Math.abs(z - (x + y))} years. (Safe until {new Date().getFullYear() + (z - (x + y))})</span>}
       </p>
 
       {/* Three-segment horizontal timeline */}

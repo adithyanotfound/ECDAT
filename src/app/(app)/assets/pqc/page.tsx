@@ -13,6 +13,16 @@ import { Download, Shield } from "lucide-react";
 
 const columns: ColumnDef<CryptoAsset>[] = [
   {
+    key: "repositoryFullName",
+    header: "Repository",
+    sortable: true,
+    render: (row) => (
+      <span className="text-sm font-medium" style={{ color: "var(--color-ink-muted)" }}>
+        {row.repositoryFullName ?? "—"}
+      </span>
+    ),
+  },
+  {
     key: "name",
     header: "Algorithm Name",
     sortable: true,
