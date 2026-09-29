@@ -38,7 +38,7 @@ function toFullName(input: string): string {
 
 export function AddGithubRepoDialog({ open, onClose, onAdded }: Done & { open: boolean }) {
   const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,7 +53,8 @@ export function AddGithubRepoDialog({ open, onClose, onAdded }: Done & { open: b
         body: JSON.stringify({
           sourceType: "GITHUB",
           fullName: toFullName(repo),
-          defaultBranch: branch.trim() || "main",
+          // Empty means "the repository's own default branch"; the server looks it up.
+          defaultBranch: branch.trim() || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -97,8 +98,13 @@ export function AddGithubRepoDialog({ open, onClose, onAdded }: Done & { open: b
             className={inputClass}
           />
         </Field>
-        <Field label="Branch to scan">
-          <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" className={inputClass} />
+        <Field label="Branch to scan (optional)" hint="Leave empty to scan the repository's default branch.">
+          <input
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            placeholder="Default branch"
+            className={inputClass}
+          />
         </Field>
         {error && <Notice tone="critical">{error}</Notice>}
       </form>

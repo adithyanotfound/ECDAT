@@ -15,10 +15,13 @@ import { join, dirname } from "path";
 import { Readable } from "stream";
 import { getInstallationOctokit } from "./auth";
 import { safeJoin } from "@/server/security/paths";
+import { lookupPublicRepo } from "./publicRepo";
 
 export interface Checkout {
   dir: string;
   cleanup: () => Promise<void>;
+  /** Set when the requested branch was missing and the default branch was scanned instead. */
+  resolvedBranch?: string;
 }
 
 const MAX_TARBALL_BYTES = 200 * 1024 * 1024; // 200MB ceiling per scan
@@ -27,10 +30,11 @@ export async function checkoutTarball(
   installationId: number | null | undefined,
   owner: string,
   repo: string,
-  ref: string
+  ref: string,
 ): Promise<Checkout> {
   let buffer: Buffer;
-  
+  let resolvedBranch: string | undefined;
+
   if (installationId) {
     const octokit = await getInstallationOctokit(installationId);
     const res = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
@@ -42,11 +46,34 @@ export async function checkoutTarball(
   } else {
     // For manual/public repos without an app installation, download anonymously.
     // Each part is encoded so a crafted name can't change which GitHub URL is fetched.
-    const branch = ref.replace(/^refs\/heads\//, "").split("/").map(encodeURIComponent).join("/");
-    const url = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/archive/refs/heads/${branch}.tar.gz`;
-    const res = await fetch(url, { redirect: "follow" });
+    const archiveUrl = (b: string) =>
+      `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/archive/refs/heads/${b
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}.tar.gz`;
+    const wanted = ref.replace(/^refs\/heads\//, "");
+    let res = await fetch(archiveUrl(wanted), { redirect: "follow" });
+
+    // The branch may never have existed (added as "main" when the repository
+    // uses "master"), or been renamed. Fall back to the current default branch.
+    if (res.status === 404) {
+      const lookup = await lookupPublicRepo(owner, repo);
+      if (lookup.status === "not_found") {
+        throw new Error(
+          `GitHub couldn't find ${owner}/${repo}. It may have been deleted, renamed or made private; private repositories need the GitHub App.`,
+        );
+      }
+      if (lookup.status === "ok" && lookup.defaultBranch !== wanted) {
+        res = await fetch(archiveUrl(lookup.defaultBranch), { redirect: "follow" });
+        if (res.ok) resolvedBranch = lookup.defaultBranch;
+      }
+    }
     if (!res.ok) {
-      throw new Error(`Failed to fetch tarball from ${url}: ${res.status} ${res.statusText}`);
+      throw new Error(
+        res.status === 404
+          ? `${owner}/${repo} has no branch called "${wanted}". Check the branch name on the repository's page.`
+          : `Downloading ${owner}/${repo} from GitHub failed: ${res.status} ${res.statusText}`,
+      );
     }
     buffer = Buffer.from(await res.arrayBuffer());
   }
@@ -118,6 +145,7 @@ export async function checkoutTarball(
 
   return {
     dir,
+    resolvedBranch,
     cleanup: async () => {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
     },

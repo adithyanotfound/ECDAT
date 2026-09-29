@@ -71,6 +71,16 @@ export async function runScanner(
     await appendLog(scanId, "INFO", `Fetching ${payload.owner}/${payload.repo}@${payload.ref} tarball`);
     const gitRef = payload.ref.replace(/^refs\/heads\//, "");
     checkout = await checkoutTarball(payload.installationId, payload.owner, payload.repo, gitRef || payload.commitSha);
+    if (checkout.resolvedBranch) {
+      // Remember the branch that actually exists, so the next scan goes straight to it.
+      await prisma.repository.update({ where: { id: repositoryId }, data: { defaultBranch: checkout.resolvedBranch } });
+      await prisma.scan.update({ where: { id: scanId }, data: { ref: `refs/heads/${checkout.resolvedBranch}` } });
+      await appendLog(
+        scanId,
+        "WARN",
+        `Branch "${gitRef}" doesn't exist; scanned the default branch "${checkout.resolvedBranch}" instead and updated the repository.`,
+      );
+    }
   }
 
   // ── AWS cloud-native asset scans (KMS + ACM) ────────────────────────────────

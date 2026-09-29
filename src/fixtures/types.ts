@@ -105,6 +105,21 @@ export interface DashboardAggregates {
   assetsByType: AssetByType[];
   symmetricKeyDistribution: KeyDistribution[];
   asymmetricKeyDistribution: KeyDistribution[];
+  /** Repositories ranked by how urgently they need work, most urgent first. */
+  repositoryRisk: RepositoryRisk[];
+}
+
+/** One repository's crypto assets, counted by risk level. */
+export interface RepositoryRisk {
+  id: string;
+  fullName: string;
+  critical: number;
+  high: number;
+  moderate: number;
+  low: number;
+  safe: number;
+  /** Average post-quantum safety (0–10) of its algorithms, keys and certificates; null if none. */
+  readiness: number | null;
 }
 
 export interface VulnBySource {

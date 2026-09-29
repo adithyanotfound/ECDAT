@@ -3,7 +3,13 @@
  * All queries return plain serialisable objects — no Prisma types leak to the UI.
  */
 import { prisma } from "./client";
-import type { DashboardAggregates, VulnBySource, PostureBreakdown, AssetByType } from "@/fixtures/types";
+import type {
+  AssetByType,
+  DashboardAggregates,
+  PostureBreakdown,
+  RepositoryRisk,
+  VulnBySource,
+} from "@/fixtures/types";
 import { requireSession } from "@/server/auth/session";
 
 export async function getDashboardAggregates(): Promise<DashboardAggregates> {
@@ -150,6 +156,53 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
 
   const vulnerableAssetsPercent = total > 0 ? Math.round((vulnAssets / total) * 100) : 0;
 
+  // Per repository: assets by risk level, and that repository's own readiness
+  // (same primitives-only rule as the overall score above).
+  const perAsset = await prisma.riskAssessment.findMany({
+    where: { cryptoAsset: { repository: { owner } } },
+    select: {
+      riskCategory: true,
+      pqcSafetyScore: true,
+      cryptoAsset: { select: { kind: true, repository: { select: { id: true, fullName: true } } } },
+    },
+  });
+  const byRepo = new Map<string, RepositoryRisk & { pqcSum: number; pqcN: number }>();
+  for (const a of perAsset) {
+    const r = a.cryptoAsset.repository;
+    const row = byRepo.get(r.id) ?? {
+      id: r.id,
+      fullName: r.fullName,
+      critical: 0,
+      high: 0,
+      moderate: 0,
+      low: 0,
+      safe: 0,
+      readiness: null,
+      pqcSum: 0,
+      pqcN: 0,
+    };
+    const band =
+      ({ CRITICAL: "critical", HIGH: "high", MODERATE: "moderate", LOW: "low" } as const)[
+        a.riskCategory as "CRITICAL" | "HIGH" | "MODERATE" | "LOW"
+      ] ?? "safe";
+    row[band] += 1;
+    if (["ALGORITHM", "CERTIFICATE", "KEY"].includes(a.cryptoAsset.kind)) {
+      row.pqcSum += a.pqcSafetyScore;
+      row.pqcN += 1;
+    }
+    byRepo.set(r.id, row);
+  }
+  const repositoryRisk: RepositoryRisk[] = [...byRepo.values()]
+    .map(({ pqcSum, pqcN, ...row }) => ({ ...row, readiness: pqcN ? Math.round((pqcSum / pqcN) * 10) / 10 : null }))
+    // Most urgent first: critical, then high, then moderate, then size.
+    .sort(
+      (a, b) =>
+        b.critical - a.critical ||
+        b.high - a.high ||
+        b.moderate - a.moderate ||
+        b.critical + b.high + b.moderate + b.low + b.safe - (a.critical + a.high + a.moderate + a.low + a.safe),
+    );
+
   return {
     quantumReadinessScore,
     quantumReadinessBasis,
@@ -162,6 +215,7 @@ export async function getDashboardAggregates(): Promise<DashboardAggregates> {
     assetsByType,
     symmetricKeyDistribution: buildDistribution(symmetricKeys),
     asymmetricKeyDistribution: buildDistribution(asymmetricKeys),
+    repositoryRisk,
   };
 }
 

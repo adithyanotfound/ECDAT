@@ -20,6 +20,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { getRepositories } from "@/server/db/scanning";
 import { encryptSecret } from "@/server/aws/credentials";
+import { branchExists, lookupPublicRepo } from "@/server/github/publicRepo";
 import { isAuthError, sessionOr401, unauthorized } from "@/server/auth/guard";
 import { repositories as fixtureRepos } from "@/fixtures/repositories";
 
@@ -48,7 +49,8 @@ const GithubRepoSchema = z.object({
       /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/,
       "Use the owner/name form, for example octocat/hello-world.",
     ),
-  defaultBranch: BRANCH.optional().default("main"),
+  // Optional: when left out, the repository's own default branch is used.
+  defaultBranch: BRANCH.optional(),
 });
 
 export async function GET() {
@@ -83,7 +85,38 @@ export async function POST(req: NextRequest) {
         { status: 422 },
       );
     }
-    const { fullName, defaultBranch } = parsed.data;
+    const [ownerName, repoName] = parsed.data.fullName.split("/") as [string, string];
+
+    // Check with GitHub first: the repository must exist and be public (private
+    // ones need the GitHub App), and the branch must be one it really has. If
+    // GitHub can't be asked right now (rate limit), fall back to what was typed.
+    const lookup = await lookupPublicRepo(ownerName, repoName);
+    if (lookup.status === "not_found" || (lookup.status === "ok" && lookup.isPrivate)) {
+      return NextResponse.json(
+        {
+          error: `We couldn't find ${parsed.data.fullName} on GitHub. Check the spelling. Private repositories need the GitHub App instead.`,
+        },
+        { status: 422 },
+      );
+    }
+    const fullName = lookup.status === "ok" ? lookup.fullName : parsed.data.fullName;
+    let defaultBranch = parsed.data.defaultBranch;
+    if (lookup.status === "ok") {
+      if (!defaultBranch) {
+        defaultBranch = lookup.defaultBranch;
+      } else if (
+        defaultBranch !== lookup.defaultBranch &&
+        (await branchExists(ownerName, repoName, defaultBranch)) === false
+      ) {
+        return NextResponse.json(
+          {
+            error: `${fullName} has no branch called "${defaultBranch}". Its default branch is "${lookup.defaultBranch}"; leave the branch empty to use it.`,
+          },
+          { status: 422 },
+        );
+      }
+    }
+    defaultBranch ??= "main";
 
     // Repository names are unique across the whole database. Only reveal the
     // existing record's id when it belongs to the person asking.
@@ -105,6 +138,7 @@ export async function POST(req: NextRequest) {
           owner: session.login,
           name: fullName.split("/")[1] || fullName,
           defaultBranch,
+          ...(lookup.status === "ok" && lookup.language ? { language: lookup.language } : {}),
           scanEnabled: true,
         },
       });

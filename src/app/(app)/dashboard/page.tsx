@@ -12,7 +12,14 @@ import { PageHeader, SectionTitle } from "@/components/ui/Card";
 import { InfoHint } from "@/components/ui/InfoHint";
 import { buttonClass } from "@/components/ui/Button";
 import { ReadinessGauge } from "@/components/charts/ReadinessGauge";
-import { PostureCard, RankedBarsCard, SourceCard, assetRows, keyRows } from "@/components/dashboard/DashboardCharts";
+import {
+  PostureCard,
+  RankedBarsCard,
+  RepositoryRiskCard,
+  SourceCard,
+  assetRows,
+  keyRows,
+} from "@/components/dashboard/DashboardCharts";
 import { RecommendationsTable } from "@/components/dashboard/RecommendationsTable";
 import { GettingStarted } from "@/components/repos/GettingStarted";
 import { LatticeField } from "@/components/effects/LatticeField";
@@ -170,6 +177,7 @@ export default async function DashboardPage() {
           {/* Layer 3: where the risk sits */}
           <section className="flex flex-col gap-4">
             <SectionTitle title="Where the risk sits" description="Hover a bar for its exact numbers." />
+            <RepositoryRiskCard data={d.repositoryRisk} />
             <div className="grid gap-4 xl:grid-cols-2">
               <PostureCard data={d.cryptographicPosture} />
               <SourceCard data={d.vulnerabilitiesBySource} />
